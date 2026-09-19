@@ -1,7 +1,7 @@
 import {
   AssemblySchema, BuildStateSchema, JobSchema, PlanSchema, S,
   type Assembly, type BuildEvent, type BuildIdea, type BuildState, type CopilotContext, type CopilotResponse, type DirectorCommand, type Job, type Plan,
-  type RetrievedChunk, type Twin,
+  type RetrievedChunk, type Surface, type Twin,
 } from "@cutonce/schemas";
 import type { ZodTypeAny } from "zod";
 import { clearToken, getToken } from "./auth";
@@ -322,7 +322,7 @@ export async function fetchLastFrame(signal?: AbortSignal): Promise<string | nul
 }
 
 // ── build mode ───────────────────────────────────────────────────────────────
-export interface BuildCurrent { session: { session_id: string; created_at: string; scans: string[] } | null; wish: string | null; twins: Twin[]; ideas: BuildIdea[] }
+export interface BuildCurrent { session: { session_id: string; created_at: string; scans: string[] } | null; wish: string | null; surfaces?: Surface[]; twins: Twin[]; ideas: BuildIdea[] }
 export interface BuildScanRow { scan_id: string; session_id: string | null; captured_at: string | null; recording: boolean }
 /** `standard`: the object has a standard size, so it can be added by hand. */
 export interface BuildVocabItem { name: string; label: string; standard: boolean }
@@ -333,3 +333,5 @@ export const startBuildIdea = (ideaId: string) => request<{ assembly_id: string;
 export const addBuildObject = (name: string) => request<Twin>("POST", "/v1/build/objects", { body: { name } });
 export const newBuildSession = () => request<{ session_id: string }>("POST", "/v1/build/sessions", { body: {} });
 export const getBuildVocabulary = () => request<{ items: BuildVocabItem[] }>("GET", "/v1/build/vocabulary");
+/** Any text in Kit's voice (a step read aloud); play `audio_url` with fetchAnswerAudio. */
+export const sayBuild = (text: string) => request<{ turn_id: string; audio_url: string }>("POST", "/v1/build/say", { body: { text } });

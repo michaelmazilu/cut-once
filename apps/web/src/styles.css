@@ -303,6 +303,10 @@ a.link-card:hover h2 { color: var(--accent); }
 .sim-answer .sim-transcript { color: var(--text-muted); font-size: var(--fs-sm); font-style: italic; }
 .sim-answer .sim-source { display: inline-flex; align-items: center; gap: 6px; margin: 0 6px 0 0; padding: 1px 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: var(--fs-sm); }
 .sim-pointing { color: var(--text); font-weight: var(--fw-med); }
+.sim-hint { margin: 10px 0 0 !important; padding-top: 10px; border-top: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text); }
+.sim-designs { margin: 6px 0; padding-left: 18px; font-size: var(--fs-sm); color: var(--text-muted); }
+.sim-designs li { padding: 1px 0; }
+.sim-designs li.on { color: var(--text); font-weight: var(--fw-med); }
 @media (max-width: 900px) { .sim-keys { top: auto; bottom: 64px; right: 16px; } .sim-answer { bottom: 250px; } }
 
 /* Copilot panel (owner: Rhythm) */

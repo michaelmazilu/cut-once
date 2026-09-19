@@ -183,6 +183,11 @@ pnpm dev                # then /director → Build mode → Replay on scan_rec_s
                         # or talk to Kit: /sim?mode=build, hold Space ("what can I build?" replays the kit)
 ```
 
+On `/sim` build mode looks like the headset's: the table and the objects found (solid, as a laptop has no
+passthrough), Kit's designs floating above them (half scale; the headset's quarter scale is a speck on a flat
+screen), and Kit's list read aloud. Click a design, or say "the left one", to build it. Then each step is read
+aloud; "done" (or **B** with nothing pointed at) finishes the step. A scan mid-build brings the designs back.
+
 With Unity in Play mode (Meta XR Simulator), the Director's **Replay** shows the outlines, the names, the previews,
 the fly-together and the walkthrough. In the Editor a scan of your own fails with "no depth": there is no depth
 sensor to cast against.
