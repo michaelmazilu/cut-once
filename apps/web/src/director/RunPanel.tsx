@@ -1,9 +1,6 @@
-import { useState } from "react";
 import type { Assembly, BuildState, Plan } from "@cutonce/schemas";
 import { useCommand } from "./useCommand";
 
-const SEEDS = ["e7_start", "demo_start", "empty"] as const;
-const SEED_LABEL: Record<(typeof SEEDS)[number], string> = { e7_start: "Engineering 7 (E7)", demo_start: "the half-built desk", empty: "an empty desk" };
 
 interface Props {
   assembly: Assembly | null;
@@ -14,7 +11,6 @@ interface Props {
 }
 
 export function RunPanel({ assembly, plan, state, noRun, onChanged }: Props) {
-  const [seed, setSeed] = useState<string>(SEEDS[0]);
   const { send, busy, error } = useCommand(onChanged);
 
   const progress = state?.progress;
@@ -49,12 +45,9 @@ export function RunPanel({ assembly, plan, state, noRun, onChanged }: Props) {
       </div>
 
       <div className="row new-run">
-        <label htmlFor="seed" className="muted">Start again from</label>
-        <select id="seed" value={seed} onChange={(e) => setSeed(e.target.value)}>
-          {SEEDS.map((s) => <option key={s} value={s}>{SEED_LABEL[s]}</option>)}
-        </select>
-        <button type="button" className="primary" disabled={busy} onClick={() => void send({ type: "new_run", seed }, "new run")}>
-          {busy ? "Starting…" : "New run"}
+        <span className="muted">Nothing shows until Kit builds something.</span>
+        <button type="button" disabled={busy} onClick={() => void send({ type: "new_run", seed: "blank" }, "clear")}>
+          {busy ? "Clearing…" : "Clear the build"}
         </button>
         {error && <span className="error-text">{error}</span>}
       </div>

@@ -9,7 +9,7 @@ import { BASELINE, CURRENT, OUT, ROOT } from "./paths.js";
 import type { PlanReport, ReportInput, RunMeta, ScenarioResult } from "./types.js";
 
 /** Plans whose geometry is compared push to push. */
-export const TRACKED_PLANS = ["data/demo/desk.plan.json", "data/e7/out/e7.plan.json"];
+export const TRACKED_PLANS = ["data/demo/desk.plan.json"];
 /** A blueprint-read part counts as right when it is within this many mm of the known-good part. */
 export const EXTRACTION_OK_MM = 5;
 

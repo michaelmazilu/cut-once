@@ -7,7 +7,7 @@ namespace CutOnce.Diagnostics
     /// <summary>
     /// Measures every frame against <see cref="QuestBudgets"/> and warns in the console when a budget is broken.
     /// Put one in every scene. In the simulator, the draw call and triangle numbers are the ones the headset will see
-    /// (plans and the E7 model are loaded at runtime, so a scene scan cannot count them). The frame rate is only
+    /// (plans are loaded at runtime, so a scene scan cannot count them). The frame rate is only
     /// judged on the headset: in the Editor it is this computer's. Development builds on the headset also log the
     /// numbers every <see cref="logEverySeconds"/> seconds (adb logcat -s Unity, lines starting [Budget]).
     ///

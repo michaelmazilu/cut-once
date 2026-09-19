@@ -26,6 +26,11 @@ namespace CutOnce.Device
     /// </summary>
     public sealed class CutOnceApp : MonoBehaviour, ICopilotHost
     {
+        /// <summary>Where the run is kept between launches (Application.persistentDataPath). Tests set it aside.</summary>
+        public const string JournalFolder = "cutonce-builds";
+        /// <summary>What the HUD says while nothing is built: the app shows no hologram until Kit builds one.</summary>
+        public const string IdleHint = "Look at some things and say \"What can I build?\", or press X to scan.";
+
         const float HighlightSeconds = 6f, RetrySeconds = 5f, WrongHoldSeconds = 0.8f, ScanButtonHoldSeconds = 1f;
 
         [Tooltip("Create the copilot (push-to-talk on A) if the scene has none.")]
@@ -56,8 +61,9 @@ namespace CutOnce.Device
             _store = new BuildStateStore();
             _store.Changed += OnStateChanged;
             _api = new ApiClient(new UnityHttpTransport(), _config);
-            // With no server and no journal the app still opens on something: E7, the default run (the desk is one "New run" away).
-            _sync = new SyncEngine(_api, _store, new Journal(Path.Combine(Application.persistentDataPath, "cutonce")), () => Resource("CutOnce/e7.plan"));
+            // The app ships no plan: with no server and no journal it opens empty, and the first hologram is one Kit builds.
+            // A new journal folder, so a run saved by an older app version never comes back.
+            _sync = new SyncEngine(_api, _store, new Journal(Path.Combine(Application.persistentDataPath, JournalFolder)), null);
             _sync.RunLoaded += OnRunLoaded;
             _sync.PlanReady += OnPlanReady;
             _sync.DirectorCommand += OnDirectorCommand;
@@ -76,7 +82,7 @@ namespace CutOnce.Device
             _selection.Init(_input, _assembly, () => _alignment.State == AlignmentState.Locked, _material);
             _selection.Changed += _ => _dirty = true;
             _hud = HudController.Create(null);
-            _hud.ShowStatus("Starting…", _alignment.Hint);
+            _hud.ShowStatus("Starting…", IdleHint);
             _roomWorkspace = gameObject.AddComponent<CutOnce.Room.RoomWorkspace>();
             _roomWorkspace.ActiveChanged += active =>
             {
@@ -88,7 +94,7 @@ namespace CutOnce.Device
                 _waitForMarkRelease = true;
             };
             _hud.Toast("X: scan the room, measure and draw objects", 12f);
-            // Build mode ("what can I build?"): off until a scan starts it, so E7 and the desk behave exactly as before.
+            // Build mode ("what can I build?"): off until a scan starts it, so other runs behave exactly as before.
             _build = gameObject.AddComponent<BuildMode>();
             _build.Init(_config, _api, _sync, _store, _assembly, _alignment, _input, surface, _hud, _material, _palette);
         }
@@ -178,9 +184,12 @@ namespace CutOnce.Device
             _hud.Toast(HudText.EventLine(_store.Plan, last, _store.Current));
         }
 
+        /// <summary>No run yet, or the blank run: nothing to draw, place or mark.</summary>
+        bool NothingBuilt => !_store.IsLoaded || _store.Plan.parts.Count == 0;
+
         void OnAlignmentChanged()
         {
-            _hud.ShowStatus(_sync.StatusLine, _alignment.Hint);
+            _hud.ShowStatus(_sync.StatusLine, NothingBuilt ? IdleHint : _alignment.Hint);
             // While build mode's pieces fly in from their real objects the hologram's bounds are half the room: the HUD was
             // stood by the lock itself, with every piece at rest, and stays there.
             if (_alignment.State == AlignmentState.Locked) { if (_build == null || !_build.PiecesInFlight) StandHud(); _waitForMarkRelease = true; }   // the B that finished a touch alignment is not a mark
@@ -207,13 +216,13 @@ namespace CutOnce.Device
         void Refresh()
         {
             _dirty = false;
-            if (!_store.IsLoaded) return;
+            if (!_store.IsLoaded) { _hud.ShowStatus(_sync.StatusLine, IdleHint); return; }
             var lit = Time.time < _highlightUntil ? _highlighted : null;
             _assembly.Show(VisualStateResolver.Resolve(_store.Plan, _store.Current, _selection.SelectedPartId, lit), _palette);
             _hud.ShowState(_store.Plan, _store.Current, MaterialList.For(_store.Plan, _store.Current), _store.Events, _assembly.ScaleLabel);
             var part = _assembly.ViewOf(_selection.SelectedPartId)?.Part;
             _hud.ShowPart(part != null && _store.Current.parts.TryGetValue(part.part_id, out var status) ? HudText.PartCard(_store.Plan, part, status, _store.Current) : "");
-            _hud.ShowStatus(_sync.StatusLine, _alignment.State == AlignmentState.Locked ? "" : _alignment.Hint);
+            _hud.ShowStatus(_sync.StatusLine, NothingBuilt ? IdleHint : _alignment.State == AlignmentState.Locked ? "" : _alignment.Hint);
         }
 
         // ── every frame ──────────────────────────────────────────────────────────────────────────────────────────

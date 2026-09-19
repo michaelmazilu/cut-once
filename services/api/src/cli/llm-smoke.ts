@@ -7,7 +7,7 @@ import { loadConfig } from "../config.js";
 import { jsonCall } from "../llm.js";
 
 const cfg = loadConfig();
-const image = readFileSync(join(cfg.repoRoot, "data/e7/stages/footprints/L01.geom.png"));
+const image = readFileSync(join(cfg.repoRoot, "data/fixtures/frame_0001.jpg"));
 const Answer = z.object({ fill_colour: z.string(), has_title_text: z.boolean() }).strict();
 const started = Date.now();
 try {

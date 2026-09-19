@@ -22,7 +22,7 @@ namespace CutOnce.AR
 
         /// <summary>
         /// 1 for anything you build at full size. A building is shown as a tabletop model at the largest architectural
-        /// scale that keeps it under <see cref="TabletopMaxMetres"/> long (E7, 91 m, becomes 1:200 and 46 cm).
+        /// scale that keeps it under <see cref="TabletopMaxMetres"/> long (a 91 m building becomes 1:200 and 46 cm).
         /// </summary>
         public float DisplayScale { get; private set; } = 1f;
         /// <summary>"1:200", or empty at full size.</summary>

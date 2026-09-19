@@ -36,9 +36,7 @@
     "quest:sim": "tsx tools/quest/unity.ts sim",
     "quest:play": "tsx tools/quest/unity.ts play",
     "quest:build": "tsx tools/quest/unity.ts build",
-    "quest:install": "tsx tools/quest/unity.ts install",
-    "e7:install": "pnpm -F @cutonce/api exec tsx src/cli/e7-install.ts",
-    "e7:benchmark": "tools/e7/.venv/bin/python tools/e7/benchmark.py"
+    "quest:install": "tsx tools/quest/unity.ts install"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

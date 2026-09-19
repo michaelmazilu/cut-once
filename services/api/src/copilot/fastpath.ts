@@ -13,8 +13,6 @@ export interface FastPathInput {
  */
 export interface FastPath {
   action: CopilotAction | null; answer_text: string; highlight_parts: string[]; note?: string; wish?: string | null;
-  /** A run to start from a seed, as the Director's New run does ("build E7"), with what to say if it is already up or cannot start. */
-  startRun?: { seed: string; already: string; failed: string };
 }
 
 /**
@@ -54,10 +52,6 @@ export function resolvePart(phrase: string, parts: Part[]): Part | null {
   return best && !tied ? best.part : null;
 }
 
-/** "Build E7", "show me E-7", "open Engineering 7": the building, as the Director's New run starts it. */
-const E7_RUN = { seed: "e7_start", already: "Engineering 7 is already up. Ask me about any part.", failed: "I couldn't open Engineering 7 on this server." };
-const OPEN_E7 = /^(?:kit )?(?:(?:can|could) you |please )?(?:build|show|open|load|bring up|go to)(?: me)?(?: the)? (?:e ?7|e seven|engineering (?:7|seven))(?: building)?$/;
-
 const PLAIN_ASK = /^(what can (i|we) (build|make)( with (this|these|that|all this|all of this|this stuff))?|what could (i|we) (build|make)( with (this|these|that))?|help me build something|build something|make something)$/;
 const ASKING = "(?:hey kit )?(?:kit )?(?:(?:can|could|would|will) you |please )?";
 /** "Build me a birdhouse", "let's make a robot", "can we build a tower with these": the thing asked for, as said. */
@@ -95,10 +89,6 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
   const { plan, state, selectedPartId, recentEvents, mode } = input;
   const nameOf = (id: string) => plan.parts.find((p) => p.part_id === id)?.name ?? id;
 
-  if (OPEN_E7.test(text)) {
-    return { action: null, answer_text: "Here's Engineering 7, rebuilt from its 14 published drawings. Ask me about any part.", highlight_parts: [], startRun: E7_RUN };
-  }
-
   // "What can I build?": the rehearsed lines never depend on a model. The headset scans and uploads. A plain ask
   // forgets the last wish; "build me a birdhouse" carries its own; another look ("scan again") keeps the one there is.
   // "Look again" is a rescan only in build mode: anywhere else it asks the copilot to look at the part again.
@@ -133,7 +123,7 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
   if (/^(done|its done|thats done|mark (it|this) (built|done)|built)$/.test(text)) {
     // Nothing selected: let the model ask which part. Except in a build-mode run, where you are holding the piece, not
     // pointing: there "done" is the whole step. Build mode is also on while scanning and picking, when the run is still
-    // the old one (E7, the desk), so the plan decides, not the mode alone.
+    // the old one, so the plan decides, not the mode alone.
     if (!selectedPartId) return mode === "build" && isBuildPlan(plan) ? stepDone(plan, state) : null;
     // The headset can point at a part from a plan revision the server no longer runs: say so, do not fail the turn.
     if (!plan.parts.some((p) => p.part_id === selectedPartId)) {

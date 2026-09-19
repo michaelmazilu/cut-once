@@ -11,7 +11,7 @@ namespace CutOnce.Device.PlayTests
     /// <summary>
     /// Build mode inside the whole app, with no server and no headset: the messages the server would send are handed to
     /// it directly, and the run a picked design starts is loaded the way the app loads any run (BuildModeHarness). Like
-    /// E7DefaultTests, the app is pointed at a closed port and any config and journal on this machine are moved aside and
+    /// before, the app is pointed at a closed port and any config and journal on this machine are moved aside and
     /// put back.
     /// </summary>
     public class BuildModeTests
@@ -55,7 +55,7 @@ namespace CutOnce.Device.PlayTests
         {
             var app = StartApp("[App] (build flight test)", copilot: false);
             for (float waited = 0f; waited < 15f && (Hologram() == null || Hologram().Views.Count == 0); waited += Time.unscaledDeltaTime) yield return null;
-            Assert.That(Hologram()?.Views.Count ?? 0, Is.GreaterThan(0), "the app's own first run (E7, offline) never loaded");
+            Assert.That(Hologram()?.Views.Count ?? 0, Is.GreaterThan(0), "the first run (the desk test plan, from the journal) never loaded");
 
             var mode = BuildModeOf();
             var ideas = IdeasFixture(); var idea = ideas.ideas[0];
@@ -108,8 +108,8 @@ namespace CutOnce.Device.PlayTests
             Assert.That((bool)Call(mode, "MarkCurrentStep"), Is.True);
             Assert.That(new[] { store.Current.parts["part_surface"].state, store.Current.current_step_id }, Is.EqualTo(new[] { "built", "step_02" }));
 
-            // The Director starts another run ("build E7"): build mode steps aside for it, and it stands on the build site, where
-            // the judge is looking. Its own origin is a corner, 30 cm and 20 cm from the middle of its footprint, as E7's is.
+            // The Director starts another run: build mode steps aside for it, and it stands on the build site, where
+            // the judge is looking. Its own origin is a corner, 30 cm and 20 cm from the middle of its footprint.
             var other = IdeasFixture().ideas[0].plan; other.plan_id = "plan_started_elsewhere";
             foreach (var part in other.parts) { part.position[0] += 0.3; part.position[2] += 0.2; }
             LogAssert.ignoreFailingMessages = true;                            // the Editor cannot make the lock's spatial anchor

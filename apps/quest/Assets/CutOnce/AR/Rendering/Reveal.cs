@@ -4,7 +4,7 @@ namespace CutOnce.AR
 {
     /// <summary>
     /// Reveals a part bottom-up by world height. Renderer.bounds is in world space whatever the pivot, so desk boxes
-    /// (centre pivots) and E7 floors (pivots at the origin) rise the same way. Never scale a part to animate it.
+    /// (centre pivots) and model parts (pivots at the origin) rise the same way. Never scale a part to animate it.
     /// </summary>
     public static class Reveal
     {

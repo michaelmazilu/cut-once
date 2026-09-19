@@ -46,10 +46,9 @@ describe("decideKit", () => {
     expect(decideKit(turn({ intent: "undo", confidence: 0.7 }), at())).toMatchObject({ kind: "say", clarify: true });
   });
 
-  it("turns steps and opens E7 as the voice commands do", () => {
+  it("turns steps as the voice commands do", () => {
     expect(decideKit(turn({ intent: "next", confidence: 0.65 }), at())).toEqual({ kind: "command", phrase: "next" });
     expect(decideKit(turn({ intent: "back" }), at())).toEqual({ kind: "command", phrase: "back" });
-    expect(decideKit(turn({ intent: "open_e7" }), at())).toEqual({ kind: "command", phrase: "build e7" });
   });
 
   it("asks back when it cannot tell, or is unsure of an action", () => {

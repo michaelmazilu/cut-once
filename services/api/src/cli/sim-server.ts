@@ -17,7 +17,7 @@ const cfg = loadConfig({}, {
   dataDir, apiToken: "sim-token", host: "127.0.0.1", port: Number(process.env.SIM_PORT ?? 8787), logLevel: "warn",
   esUrl: "", esApiKey: "", kibanaUrl: "", mcpUrl: "", openaiKey: "", elevenKey: "", reconstruction: false,
   copilotMode: "fake", fakeCopilotDelayMs: 0,
-  defaultSeed: "demo_start",   // the simulations and push reports are about the desk; the app itself starts on E7
+  defaultSeed: "demo_start", testFixtures: true,   // the simulations and push reports use the desk test plan; the app starts blank
 });
 const app = await buildApp(cfg, plugins);
 const extracted = join(cfg.repoRoot, "sim-out", "current", "extracted.plan.json");

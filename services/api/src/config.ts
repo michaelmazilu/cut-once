@@ -7,8 +7,10 @@ export interface Config {
   esUrl: string; esApiKey: string; kibanaUrl: string; mcpUrl: string; jinaEmbedId: string; jinaRerankId: string;
   searchMode: "bm25" | "hybrid"; openaiKey: string; openaiModel: string; elevenKey: string; elevenVoiceId: string; reconstruction: boolean;
   repoRoot: string; webDist: string; projectId: string; logLevel: string;
-  /** The seed of the run a fresh server starts with (DEFAULT_SEED). E7 by default; tests pin the desk. */
+  /** The seed of the run a fresh server starts with (DEFAULT_SEED). "blank" by default: no hologram until Kit builds one. */
   defaultSeed: string;
+  /** Load the test plans (the desk and fixtures) at boot. Off in the app; tests and simulations turn it on (TEST_FIXTURES=on). */
+  testFixtures: boolean;
   /** off: no copilot route. fake: canned answers, no keys (turns/fake.ts). live: Rhythm's real copilot. */
   copilotMode: "off" | "fake" | "live"; fakeCopilotDelayMs: number;
   /**
@@ -45,7 +47,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     searchMode: env.SEARCH_MODE === "hybrid" ? "hybrid" : "bm25",
     openaiKey: env.OPENAI_API_KEY ?? "", openaiModel: env.OPENAI_MODEL || "gpt-5.6-luna", elevenKey: env.ELEVENLABS_API_KEY ?? "", elevenVoiceId: env.ELEVENLABS_VOICE_ID ?? "",
     reconstruction: env.RECONSTRUCTION === "on", repoRoot: REPO_ROOT, webDist: join(REPO_ROOT, "apps", "web", "dist"),
-    projectId: env.PROJECT_ID || "proj_cutonce_demo", logLevel: env.LOG_LEVEL ?? "info", defaultSeed: env.DEFAULT_SEED || "e7_start",
+    projectId: env.PROJECT_ID || "proj_cutonce_demo", logLevel: env.LOG_LEVEL ?? "info", defaultSeed: env.DEFAULT_SEED || "blank", testFixtures: env.TEST_FIXTURES === "on",
     copilotMode: env.COPILOT_MODE === "fake" || env.COPILOT_MODE === "live" ? env.COPILOT_MODE : "off",
     fakeCopilotDelayMs: Number(env.FAKE_COPILOT_DELAY_MS ?? 1200),
     kitAi: {

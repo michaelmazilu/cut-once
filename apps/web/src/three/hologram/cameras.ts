@@ -12,7 +12,7 @@ export function planBounds(plan: Plan): Aabb {
 /**
  * Puts the camera where a person would stand. `operator`: at the near (+Z) edge, eyes at 1.6 m or 0.6 m
  * above the model, whichever is higher (true 1:1 scale, like the headset). `top`: straight down.
- * `orbit`: a three-quarter view that fits the whole model (for E7). Returns the point it looks at.
+ * `orbit`: a three-quarter view that fits the whole model. Returns the point it looks at.
  */
 export function placeCamera(camera: THREE.PerspectiveCamera, box: Aabb, view: View): THREE.Vector3 {
   const min = new THREE.Vector3(...box.min), max = new THREE.Vector3(...box.max);

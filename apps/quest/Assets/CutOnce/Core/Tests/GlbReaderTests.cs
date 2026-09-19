@@ -7,32 +7,6 @@ namespace CutOnce.Core.Tests
 {
     public class GlbReaderTests
     {
-        // The app's bundled copy: always real bytes (the one in data/e7/out is in Git LFS, a pointer on a checkout without it).
-        static string BundledGlb => Path.Combine(RepoFiles.Root, "apps", "quest", "Assets", "CutOnce", "AR", "Resources", "CutOnce", "e7.glb.bytes");
-        static PlanDto E7Plan => CoreJson.Parse<PlanDto>(File.ReadAllText(Path.Combine(RepoFiles.Root, "apps", "quest", "Assets", "CutOnce", "AR", "Resources", "CutOnce", "e7.plan.json")));
-
-        [Test]
-        public void EveryE7PartHasItsMeshAndItsBoundsMatchThePlan()
-        {
-            var meshes = GlbReader.ReadNamedMeshes(File.ReadAllBytes(BundledGlb));
-            var plan = E7Plan;
-            Assert.That(meshes.Keys.OrderBy(k => k), Is.EqualTo(plan.parts.Select(p => p.part_id).OrderBy(k => k)));
-
-            foreach (var part in plan.parts)
-            {
-                var m = meshes[part.part_id];
-                Assert.That(m.Indices.Length % 3, Is.EqualTo(0));
-                Assert.That(m.Indices.All(i => i >= 0 && i < m.Positions.Length / 3), Is.True, $"{part.part_id} has an index out of range");
-                for (int axis = 0; axis < 3; axis++)
-                {
-                    var values = Enumerable.Range(0, m.Positions.Length / 3).Select(i => (double)m.Positions[i * 3 + axis]).ToList();
-                    Assert.That(values.Min(), Is.EqualTo(part.shape.bounds.min[axis]).Within(0.002), $"{part.part_id} axis {axis} min");
-                    Assert.That(values.Max(), Is.EqualTo(part.shape.bounds.max[axis]).Within(0.002), $"{part.part_id} axis {axis} max");
-                }
-            }
-            Assert.That(meshes.Values.Sum(m => m.TriangleCount), Is.GreaterThan(plan.parts.Count * 12), "real outlines, not boxes");
-        }
-
         [Test]
         public void ItRefusesFilesThatAreNotGlb()
         {

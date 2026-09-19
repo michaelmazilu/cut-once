@@ -41,32 +41,27 @@ namespace CutOnce.Device.PlayTests
         }
 
         [UnityTest]
-        public IEnumerator TheAppComesUpOfflineWithAHologramAndAHud()
+        public IEnumerator OfflineWithNoJournalTheAppComesUpEmptyAndSaysWhatToDo()
         {
-            var type = Type.GetType("CutOnce.Device.CutOnceApp, Assembly-CSharp");
-            Assert.That(type, Is.Not.Null, "CutOnceApp is missing from Assembly-CSharp");
-
-            var go = new GameObject("[App] (smoke test)");
-            var app = go.AddComponent(type);
-            type.GetField("createCopilot").SetValue(app, false);          // the copilot needs the headset's camera and microphone
-
-            AssemblyView assembly = null;
-            for (float waited = 0f; waited < 15f; waited += Time.unscaledDeltaTime)
+            var isolation = new BuildModeHarness.Isolation(firstRun: false);
+            try
             {
-                assembly = UnityEngine.Object.FindAnyObjectByType<AssemblyView>();
-                if (assembly != null && assembly.Views.Count > 0) break;
-                yield return null;
+                var type = Type.GetType("CutOnce.Device.CutOnceApp, Assembly-CSharp");
+                Assert.That(type, Is.Not.Null, "CutOnceApp is missing from Assembly-CSharp");
+                var go = new GameObject("[App] (smoke test)");
+                var app = go.AddComponent(type);
+                type.GetField("createCopilot").SetValue(app, false);          // the copilot needs the headset's camera and microphone
+                for (float waited = 0f; waited < 3f; waited += Time.unscaledDeltaTime) yield return null;   // a sync attempt fails in that time
+
+                var assembly = UnityEngine.Object.FindAnyObjectByType<AssemblyView>(FindObjectsInactive.Include);
+                Assert.That(assembly, Is.Not.Null, "no AssemblyRoot was created");
+                Assert.That(assembly.Views.Count, Is.EqualTo(0), "the app ships no plan: nothing is drawn until Kit builds something");
+                Assert.That(UnityEngine.Object.FindAnyObjectByType<HudController>(), Is.Not.Null);
+                var status = GameObject.Find("[HUD]").transform.Find("status").GetComponent<UnityEngine.UI.Text>().text;
+                Assert.That(status, Does.Contain("What can I build?"));
+                UnityEngine.Object.Destroy(go);
             }
-
-            Assert.That(assembly, Is.Not.Null, "no AssemblyRoot was created");
-            Assert.That(assembly.Views.Count, Is.GreaterThan(0), "no plan was loaded within 15 s (server, journal and bundled plan all failed)");
-            Assert.That(assembly.Views.Count, Is.EqualTo(assembly.Plan.parts.Count), "every part of the desk plan has a drawable shape");
-            foreach (var view in assembly.Views.Values) Assert.That(view.Style, Is.Not.Null, $"{view.PartId} was never given a look");
-            Assert.That(UnityEngine.Object.FindAnyObjectByType<HudController>(), Is.Not.Null);
-            Assert.That(UnityEngine.Object.FindAnyObjectByType<AlignmentController>().State, Is.EqualTo(AlignmentState.Placing), "with no saved anchor the app asks to be placed");
-
-            yield return null;
-            UnityEngine.Object.Destroy(go);
+            finally { isolation.Restore(); }
         }
 
         [UnityTest]

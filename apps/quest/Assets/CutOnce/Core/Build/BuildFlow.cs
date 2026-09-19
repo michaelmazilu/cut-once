@@ -22,7 +22,7 @@ namespace CutOnce.Core
         public bool Active => Phase != BuildPhase.Off;
         /// <summary>Where the design stands in the room: the chosen one's origin, else (while choosing) where the first idea would go. Null before there are ideas.</summary>
         public BuildOriginDto Site => Chosen?.origin ?? (Ideas.Count > 0 ? Ideas[0]?.origin : null);
-        /// <summary>While you look at the room and choose, the run that was showing (E7, the desk, the last design) is out of the way.</summary>
+        /// <summary>While you look at the room and choose, the run that was showing (the last design) is out of the way.</summary>
         public bool HidesHologram => Phase == BuildPhase.Scanning || Phase == BuildPhase.Labelled || Phase == BuildPhase.Ideas || Phase == BuildPhase.Starting;
         bool Building => Phase == BuildPhase.Starting || Phase == BuildPhase.Assembling || Phase == BuildPhase.Walkthrough;
         /// <summary>

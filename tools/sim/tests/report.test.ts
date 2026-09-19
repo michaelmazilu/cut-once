@@ -7,7 +7,7 @@ const base: ReportInput = {
   baseline: { sha: "9f8e7d6c5b", dirty: false, created_at: "2026-09-19T11:00:00Z", ci: true },
   screens: [
     { scene: "desk-demo-start", note: "demo start", status: "changed", diffPct: 3.2 },
-    { scene: "e7-full", note: "E7", status: "same", diffPct: 0 },
+    { scene: "desk-full", note: "desk", status: "same", diffPct: 0 },
   ],
   plans: [{ file: "data/demo/desk.plan.json", diff: { from: { plan_id: "plan_desk_demo", revision: 1 }, to: { plan_id: "plan_desk_demo", revision: 2 },
     changes: [{ part_id: "part_tabletop", name: "Tabletop", change: "changed", moved_mm: 10, resized_mm: 0, fields: [] }], unchanged: 8 } }],

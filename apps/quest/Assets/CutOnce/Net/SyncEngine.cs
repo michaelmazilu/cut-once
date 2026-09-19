@@ -66,7 +66,7 @@ namespace CutOnce.Net
                 if (_store.IsLoaded) return;                                  // keep what is on screen; a retry will come
                 if (saved?.plan_json != null && saved.assembly != null)
                     Load(saved.assembly, CoreJson.Parse<PlanDto>(saved.plan_json), saved.plan_json, saved.events.Concat(saved.pending));
-                else
+                else if (_bundledPlanJson != null)                             // the app passes none: offline with no journal, it stays empty
                 {
                     string json = _bundledPlanJson();
                     var plan = CoreJson.Parse<PlanDto>(json);

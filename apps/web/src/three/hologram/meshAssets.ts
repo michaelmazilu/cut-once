@@ -5,7 +5,7 @@ const cache = new Map<string, Promise<THREE.Group>>();
 
 /**
  * Loads a plan's GLB once and returns a copy of the node named `node` (node name = part id, by contract).
- * E7's GLB has its coordinates baked into the vertices, so the node needs no parent transform.
+ * A GLB whose coordinates are baked into the vertices needs no parent transform.
  */
 export function loadMeshNode(url: string, node: string, headers: Record<string, string>): Promise<THREE.Object3D | null> {
   let scene = cache.get(url);

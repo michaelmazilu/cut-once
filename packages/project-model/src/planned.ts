@@ -1,7 +1,7 @@
 import type { BuildEvent, Plan } from "@cutonce/schemas";
 import { ulid } from "ulid";
 
-/** The plan's own build order as synthetic events: one `missing → built` per part. Used for E7 and replays. */
+/** The plan's own build order as synthetic events: one `missing → built` per part. Used for replays. */
 export function plannedEvents(plan: Plan, assemblyId: string, start: string, secondsPerMinute = 60): BuildEvent[] {
   let t = Date.parse(start);
   let version = 0;

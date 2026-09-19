@@ -75,7 +75,7 @@ namespace CutOnce.Device.PlayTests
             TableSurface surface = null; StubServer server = null;
             yield return ScanRig(mode, (s, srv) => { surface = s; server = srv; }, raysPerFrame: 8);
 
-            // Leave while the rays are still being cast (the Director started E7, or X was held): nothing is uploaded afterwards.
+            // Leave while the rays are still being cast (the Director cleared the build, or X was held): nothing is uploaded afterwards.
             Call(mode, "StartScan");
             yield return null; yield return null;
             Assert.That(surface.Rays, Is.InRange(1, 16 * 12 - 1), "the scan is under way");

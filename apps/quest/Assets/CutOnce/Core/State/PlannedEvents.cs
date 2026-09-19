@@ -7,7 +7,7 @@ namespace CutOnce.Core
 {
     /// <summary>
     /// The plan's own build order as synthetic events: one missing → built per part (twin of planned.ts).
-    /// Used for the E7 rise and for playing the planned future on the timeline. These never leave the headset.
+    /// Used for playing the planned future on the timeline. These never leave the headset.
     /// </summary>
     public static class PlannedEvents
     {

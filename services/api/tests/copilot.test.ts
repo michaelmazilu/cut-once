@@ -126,14 +126,8 @@ describe("fast path", () => {
     expect(matchFastPath("done", input({ mode: "overlay", plan: { ...plan(), plan_id: "plan_build_01k5" } }))).toBeNull();
   });
 
-  const E7_RUN = { seed: "e7_start", already: "Engineering 7 is already up. Ask me about any part.", failed: "I couldn't open Engineering 7 on this server." };
-  it("'build E7' and its cousins open Engineering 7, as the Director's New run does", () => {
-    for (const said of ["Build E7.", "show me E-7", "Open Engineering 7", "Kit, bring up E seven", "go to the E7 building"]) {
-      expect([said, matchFastPath(said, input())]).toEqual([said, {
-        action: null, answer_text: "Here's Engineering 7, rebuilt from its 14 published drawings. Ask me about any part.", highlight_parts: [], startRun: E7_RUN,
-      }]);
-    }
-    for (const said of ["what is E7 made of", "how tall is E7", "build a birdhouse"]) expect(matchFastPath(said, input())?.startRun).toBeUndefined();
+  it("no phrase opens a prebuilt model: the app only shows what Kit builds", () => {
+    for (const said of ["Build E7.", "open Engineering 7", "show me the desk"]) expect(matchFastPath(said, input())).toBeNull();
   });
 
   it("'next' and 'back' navigate without touching the event log", () => {

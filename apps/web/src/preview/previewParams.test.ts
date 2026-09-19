@@ -14,8 +14,8 @@ describe("parsePreviewParams", () => {
     expect(parsePreviewParams("?built=part_tabletop,part_left_front_leg").built).toEqual(["part_tabletop", "part_left_front_leg"]);
   });
   it("reads replay, highlight, compare and the camera", () => {
-    const p = parsePreviewParams("?plan=plan_e7_massing&replay=0.5&highlight=a,b&compare=plan_desk_demo&view=orbit&fov=200&still=1&hud=0");
-    expect(p).toMatchObject({ planId: "plan_e7_massing", replay: 0.5, highlight: ["a", "b"], compare: "plan_desk_demo", view: "orbit", fov: 120, still: true, hud: false });
+    const p = parsePreviewParams("?plan=plan_build_a&replay=0.5&highlight=a,b&compare=plan_desk_demo&view=orbit&fov=200&still=1&hud=0");
+    expect(p).toMatchObject({ planId: "plan_build_a", replay: 0.5, highlight: ["a", "b"], compare: "plan_desk_demo", view: "orbit", fov: 120, still: true, hud: false });
     expect(parsePreviewParams("?replay=play").replay).toBe("play");
     expect(parsePreviewParams("?replay=7").replay).toBe(1);
     expect(parsePreviewParams("?view=sideways").view).toBe("operator");

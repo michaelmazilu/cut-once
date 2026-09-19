@@ -99,7 +99,7 @@ namespace CutOnce.AR.Tests
             AreClose(Vector3.right, (railBuilt.LocalRotation * Vector3.up).Abs(), 1e-3f);
 
             var model = new PartDto { part_id = "part_model", name = "Model", position = new double[] { 0, 0, 0 },
-                shape = new ShapeDto { type = "mesh", uri = "e7.glb", node = "part_model", bounds = new BoundsDto { min = new double[] { 0, 0, 0 }, max = new double[] { 40, 4.5, 90 } } } };
+                shape = new ShapeDto { type = "mesh", uri = "model.glb", node = "part_model", bounds = new BoundsDto { min = new double[] { 0, 0, 0 }, max = new double[] { 40, 4.5, 90 } } } };
             var stand = ShapeFactory.Build(model);
             AreClose(new Vector3(-20f, 2.25f, 45f), stand.LocalPosition);
             AreClose(new Vector3(40f, 4.5f, 90f), stand.Mesh.bounds.size, 1e-2f);

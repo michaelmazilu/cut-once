@@ -229,15 +229,15 @@ namespace CutOnce.Device
                 _fly.Play(_assembly, plan, _flow.Chosen, _twins);
                 return true;
             }
-            // Another run took over (the Director started E7, the desk, or a design this headset never saw). While a build is
+            // Another run took over (the Director cleared the build, or a design this headset never saw). While a build is
             // under way that always ends build mode. Before that, only when build mode was switched on over a server run: the
             // app's own first load, arriving after an early scan, is not a takeover.
             bool building = _flow.Phase == BuildPhase.Assembling || _flow.Phase == BuildPhase.Walkthrough;
             var site = _flow.Site ?? _site;                                  // read before Exit forgets the ideas
             bool tookOver = _flow.Active && (building || _overServerRun);
             if (tookOver) Exit();
-            // The new run ("build E7") stands on the build site, where the viewer is looking: its own origin may be a corner
-            // (E7's is), and the hologram is where build mode put it or was about to. Not when build mode is still choosing
+            // The new run stands on the build site, where the viewer is looking: its own origin may be a corner
+            // (a plan's often is), and the hologram is where build mode put it or was about to. Not when build mode is still choosing
             // (the run stays hidden), not for the placed design itself coming round again, and not once the operator has
             // placed something by hand since.
             if (!_flow.Active && plan != null && plan.plan_id != _sitePlanId && (tookOver || _alignment.Method == "build")) StandOnTheBuildSite(site);

@@ -14,7 +14,7 @@ on the Quest.
    [Mac (Apple Silicon)](https://developers.meta.com/horizon/downloads/package/meta-xr-simulator-mac-arm/) or
    [Windows](https://developers.meta.com/horizon/downloads/package/meta-xr-simulator-windows/). On a Mac it must end
    up at `/Applications/MetaXRSimulator.app`. Do not install the old `com.meta.xr.simulator` package.
-3. **Git LFS:** `git lfs install && git lfs pull`. Without it, the E7 model is a text file.
+3. **Git LFS:** `git lfs install && git lfs pull`. Without it, binary files are text pointers.
 4. In Unity Hub, click **Add → Add project from disk** and pick `apps/quest`. The first open imports packages for a
    few minutes.
 5. Check it with **Cut Once > Check Quest readiness**. If anything is red, run **Cut Once > Apply Quest 3 settings**.
@@ -79,7 +79,7 @@ The web app's `/sim` covers the server and copilot loop without Unity. This simu
   - `pnpm quest:setup` puts the Quest 3 settings back and applies Meta's automatic fixes.
 
 One warning stays on purpose: Meta suggests dynamic resolution. It is off because the simulator cannot show it and
-it softens the thin edge lines. Turn it on only if the headset misses 72 fps with E7 loaded.
+it softens the thin edge lines. Turn it on only if the headset misses 72 fps with a design loaded.
 
 ## On the headset
 
@@ -95,7 +95,7 @@ Check on the headset before the demo:
 - **Passthrough:** the room shows, not black. The hologram sits on the desk at the right size.
 - **Alignment:** the hologram sits on the real desk, with the far corner off by at most 5 mm.
 - **Copilot:** it asks for the camera and microphone once, and its answers point at the right part.
-- **Frame rate:** the `[Budget]` lines show 72 fps and no dropped frames with the full desk plan, then with E7 loaded.
+- **Frame rate:** the `[Budget]` lines show 72 fps and no dropped frames with a full design loaded.
 - **Legibility:** the palette states can be told apart over the real room at arm's length.
 
 ## AI agents (Claude Code, Codex)

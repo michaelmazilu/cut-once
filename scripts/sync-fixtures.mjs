@@ -13,7 +13,7 @@ mkdirSync(fixtures, { recursive: true }); mkdirSync(streaming, { recursive: true
 cpSync(join(root, "data", "fixtures"), fixtures, { recursive: true });
 let copied = 0;
 // Plans and models for the app, and the stored camera frame the copilot's FixtureFrameSource reads in the Editor.
-const wanted = [["data/demo", /\.(plan|events)\.json$|\.glb$/], ["data/e7/out", /\.(plan|events)\.json$|\.glb$/], ["data/fixtures", /^frame_.*\.(jpg|pose\.json)$/]];
+const wanted = [["data/fixtures", /^frame_.*\.(jpg|pose\.json)$/]];
 for (const [dir, pattern] of wanted) {
   const abs = join(root, dir);
   if (!existsSync(abs)) continue;

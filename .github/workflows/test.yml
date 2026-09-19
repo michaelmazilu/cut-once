@@ -20,13 +20,3 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: 8.0.x }
       - run: bash tools/quest-tests/run.sh
-  # The E7 accuracy benchmark reads only committed, openly licensed data (OpenStreetMap, Ontario lidar), never the
-  # drawings, so it can run here: it fails when data/e7/out/e7.benchmark.json no longer matches the model.
-  e7-benchmark:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install "numpy>=1.26,<3" "shapely>=2.0,<3" "pillow>=10,<12" "pyyaml>=6,<7"
-      - run: python tools/e7/benchmark.py --check

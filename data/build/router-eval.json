@@ -29,7 +29,7 @@
   {"said": "what is this made of", "mode": "overlay", "ideas": [], "expect": "question"},
   {"said": "where does the cable go", "mode": "overlay", "ideas": [], "expect": "question"},
   {"said": "what floor are we on", "mode": "overlay", "ideas": [], "expect": "question"},
-  {"said": "how tall is E7", "mode": "overlay", "ideas": [], "expect": "question"},
+  {"said": "how tall is this going to be", "mode": "overlay", "ideas": [], "expect": "question"},
   {"said": "which drawing is this from", "mode": "overlay", "ideas": [], "expect": "question"},
   {"said": "is the left leg in the right place", "mode": "overlay", "ideas": [], "expect": "question"},
   {"said": "how many steps are left", "mode": "build", "ideas": [], "expect": "question"},

@@ -14,13 +14,12 @@ next, keeps a version history of the real build, and answers spoken questions ab
 | `packages/schemas` | The shared data formats (Zod → JSON Schema). Every part has one stable `part_id` used everywhere |
 | `packages/project-model` | Pure logic: replay events into state, step order, the plan checker |
 | `knowledge` | Elasticsearch mappings, Agent Builder tools, the `log_issue` Workflow, ES\|QL |
-| `tools/e7` | Offline Python pipeline: published E7 floor plans → massing model → build sequence |
 | `data/fixtures` | The contract between TypeScript and C#: plans, events and the states they must produce |
-| `data/demo` | The demo desk: plan, seeds, documents, measuring sheet |
+| `data/demo` | Test data only (the desk plan, seeds, documents): loaded by the tests and simulations, never by the app |
 | `docs` | Blueprint, team plan, build plan, critique |
 
 ## Two ideas hold it together
-1. **One plan format.** The desk and the E7 building are the same kind of file. The headset, the web viewer, search and the copilot all read it.
+1. **One plan format.** Every design Kit builds is a normal plan. The headset, the web viewer, search and the copilot all read it. The app starts with nothing built.
 2. **Build state is never stored.** Every change is an appended event; state is a replay of the log. That gives rewind, replay, planned-versus-actual and analytics for free. Disk is the record; Elasticsearch is a rebuildable index.
 
 ## Run it
@@ -33,11 +32,11 @@ pnpm test && pnpm typecheck
 ```
 Headset app (Unity closed): `pnpm quest:check`, `pnpm quest:build`, `pnpm quest:install`.
 Useful: `pnpm pm validate <plan.json>`, `pnpm gen:fixtures`, `pnpm sync:fixtures`, `pnpm reindex`, `pnpm search:eval`, `pnpm serve:local` + `pnpm tunnel`, `pnpm backup`.
-Put it online (laptop + Cloudflare tunnel, no VM): `infra/README.md`. Elasticsearch: `knowledge/README.md`. E7: `tools/e7/README.md`.
+Put it online (laptop + Cloudflare tunnel, no VM): `infra/README.md`. Elasticsearch: `knowledge/README.md`.
 
 ## Honest labels
 **Live:** the aligned hologram, part states, the event log and rewind, the copilot, the camera check, search.
-**Precomputed by our own pipeline, then replayed:** the desk plan read from its drawings (reviewed by a person) and the E7 model.
+**Precomputed by our own pipeline, then replayed:** the desk test plan, read from its drawings and reviewed by a person.
 **Vision, not built:** whole-building drawings to accurate 3D, electrical drawings to routes, site-scale tracking.
 
 Credits and licences: `SOURCES.md`. Codex log: `CODEX_LOG.md`.

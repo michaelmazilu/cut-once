@@ -16,7 +16,7 @@ import { transcribe } from "./stt.js";
  */
 export const KitTurn = z.object({
   heard: z.string(),
-  intent: z.enum(["question", "ideas", "change", "pick", "done", "next", "back", "undo", "open_e7", "unclear"]),
+  intent: z.enum(["question", "ideas", "change", "pick", "done", "next", "back", "undo", "unclear"]),
   wish: z.string().nullable(),
   pick: z.string().nullable(),
   answer: z.string(),
@@ -37,7 +37,6 @@ export const KIT_SYSTEM = [
   "- done: they have finished the current step (\"done\", \"I've put the can in\").",
   "- next, back: they want the next or the previous step.",
   "- undo: they want the last change undone.",
-  "- open_e7: they want to see Engineering 7 (E7), the university building.",
   "- unclear: you cannot tell. Ask them back in answer.",
   "",
   "Rules:",
@@ -108,7 +107,7 @@ export function pickByPosition<T>(said: string, ideas: T[]): T | null {
 
 export type KitDecision =
   | { kind: "say"; text: string; clarify: boolean }
-  | { kind: "command"; phrase: "done" | "next" | "back" | "undo" | "build e7" }
+  | { kind: "command"; phrase: "done" | "next" | "back" | "undo" }
   | { kind: "scan"; wish: string | null; text: string }
   | { kind: "rethink"; wish: string; text: string }
   | { kind: "start"; ideaId: string; title: string };
@@ -149,8 +148,6 @@ export function decideKit(kit: KitTurn, at: KitAt): KitDecision {
       return kit.confidence >= KIT_CHANGE_MIN && !isQuestion(kit.heard) ? { kind: "command", phrase: kit.intent } : unsure;
     case "next": case "back":
       return sure ? { kind: "command", phrase: kit.intent } : unsure;
-    case "open_e7":
-      return kit.confidence >= KIT_CHANGE_MIN ? { kind: "command", phrase: "build e7" } : unsure;
     default:
       return unsure;
   }

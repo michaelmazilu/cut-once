@@ -56,7 +56,7 @@ namespace CutOnce.Device
             bool created = await anchor.WhenCreatedAsync();
             if (!created || mine != _sessionRequests) { if (go != null) Destroy(go); return null; }   // no anchor here, or a newer lock has asked since
             DiscardSessionAnchor();
-            _session = anchor;                                                // never saved: the id in PlayerPrefs stays the one for E7 or the desk
+            _session = anchor;                                                // never saved: the id in PlayerPrefs stays the one for the last build
             return go.transform;
         }
 

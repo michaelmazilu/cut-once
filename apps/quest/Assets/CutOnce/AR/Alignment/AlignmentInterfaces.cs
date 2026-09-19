@@ -34,7 +34,7 @@ namespace CutOnce.AR
         Task Forget();
         /// <summary>
         /// An anchor for this session only (a build-mode design): it pins the pose to the room like any other, but it is
-        /// never saved, and the saved one is left exactly as it was, so the next launch still finds E7 or the desk.
+        /// never saved, and the saved one is left exactly as it was, so the next launch still finds the last build.
         /// </summary>
         Task<Transform> CreateForSessionAt(Pose worldPose);
     }

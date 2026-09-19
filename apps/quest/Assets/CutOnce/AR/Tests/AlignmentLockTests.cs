@@ -9,7 +9,7 @@ namespace CutOnce.AR.Tests
 {
     /// <summary>
     /// Build mode locks the hologram where the server put the design. That lock is for this session only: the anchor and
-    /// the nudge saved for E7 or the desk must still be there on the next launch, or the building comes back at last
+    /// the nudge saved for the last build must still be there on the next launch, or the building comes back at last
     /// night's build site.
     /// </summary>
     public class AlignmentLockTests
@@ -52,7 +52,7 @@ namespace CutOnce.AR.Tests
         {
             // The saved nudge lives in this machine's PlayerPrefs, which the Editor's play mode shares: put back what was there.
             _hadNudge = PlayerPrefs.HasKey(NudgeKey); _nudgeBefore = PlayerPrefs.GetString(NudgeKey, "");
-            PlayerPrefs.SetString(NudgeKey, "the desk's saved nudge");
+            PlayerPrefs.SetString(NudgeKey, "the last build's saved nudge");
 
             _root = new GameObject("AssemblyRoot (test)");
             var assembly = _root.AddComponent<AssemblyView>();
@@ -90,8 +90,8 @@ namespace CutOnce.AR.Tests
             var pose = new Pose(new Vector3(1f, 0.74f, 2f), Quaternion.Euler(0f, 30f, 0f));
             _alignment.LockAt(pose, "build");
 
-            Assert.That(new[] { _anchors.Forgotten, _anchors.Saved }, Is.EqualTo(new[] { 0, 0 }), "the anchor saved for E7 or the desk was erased or replaced: next launch it comes back at the build site");
-            Assert.That(PlayerPrefs.GetString(NudgeKey), Is.EqualTo("the desk's saved nudge"));
+            Assert.That(new[] { _anchors.Forgotten, _anchors.Saved }, Is.EqualTo(new[] { 0, 0 }), "the anchor saved for the last build was erased or replaced: next launch it comes back at the build site");
+            Assert.That(PlayerPrefs.GetString(NudgeKey), Is.EqualTo("the last build's saved nudge"));
             Assert.That(_anchors.ForThisSession, Is.EqualTo(1), "it is still pinned to the room, by an anchor that is never saved");
             Assert.That(Vector3.Distance(_anchors.SessionPose.position, pose.position), Is.LessThan(1e-5f));
             Assert.That(_root.transform.parent, Is.SameAs(_anchors.SessionAnchor));
@@ -107,7 +107,7 @@ namespace CutOnce.AR.Tests
             Frame();                                                            // grip + stick: nudging
             _input.GripHeld = false; _input.Stick = Vector2.zero;
             Frame();                                                            // grip released: this is where a nudge is saved
-            Assert.That(PlayerPrefs.GetString(NudgeKey), Is.EqualTo("the desk's saved nudge"),
+            Assert.That(PlayerPrefs.GetString(NudgeKey), Is.EqualTo("the last build's saved nudge"),
                 "a nudge relative to tonight's build anchor was saved over the desk's: next launch the desk is offset by it");
             Assert.That(_root.transform.position.y, Is.EqualTo(before.y).Within(1e-5f), "(the nudge itself still works: it slides, level)");
         }

@@ -141,7 +141,7 @@ export const createAssembly = (body: { plan_id: string; revision?: number; seed:
 export const getPlan = (planId: string, revision?: number) =>
   request<Plan>("GET", `/v1/plans/${enc(planId)}`, { query: { revision }, schema: PlanSchema, label: "Plan" });
 
-/** Where a plan's mesh files (such as e7.glb) are served. Needs the bearer header. */
+/** Where a plan's mesh files (glb models) are served. Needs the bearer header. */
 export const planAssetUrl = (planId: string, name: string) => `/v1/plans/${enc(planId)}/assets/${enc(name)}`;
 
 export const approvePlan = (planId: string, body: { revision: number; approved_by: string }) =>

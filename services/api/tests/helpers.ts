@@ -11,8 +11,8 @@ export const auth = { authorization: `Bearer ${TOKEN}` };
 
 export async function makeApp(overrides: Partial<Config> = {}) {
   const dataDir = overrides.dataDir ?? mkdtempSync(join(tmpdir(), "cutonce-"));
-  // The tests were written around the half-built desk, so they pin it as the first run; the app itself starts on E7.
-  const cfg = loadConfig({}, { dataDir, apiToken: TOKEN, logLevel: "silent", esUrl: "", esApiKey: "", openaiKey: "", defaultSeed: "demo_start", ...overrides });
+  // The tests were written around the half-built desk (test data only), so they load it and pin it as the first run; the app starts blank.
+  const cfg = loadConfig({}, { dataDir, apiToken: TOKEN, logLevel: "silent", esUrl: "", esApiKey: "", openaiKey: "", defaultSeed: "demo_start", testFixtures: true, ...overrides });
   const app = await buildApp(cfg, plugins);
   return { app, dataDir, cleanup: async () => { await app.close(); rmSync(dataDir, { recursive: true, force: true }); } };
 }

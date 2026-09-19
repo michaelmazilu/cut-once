@@ -35,11 +35,11 @@ export class Store {
     return readdirSync(dir).map((f) => /^rev-(\d+)\.json$/.exec(f)?.[1]).filter((n): n is string => !!n).map(Number).sort((a, b) => a - b);
   }
 
-  // ── plan assets (mesh files such as e7.glb, kept beside the plan that names them) ──
+  // ── plan assets (mesh files, kept beside the plan that names them) ──
   private static ASSET_NAME = /^[a-z0-9][a-z0-9_-]*\.(glb|gltf|png|jpg)$/;
 
   /**
-   * Copies a plan's mesh file next to it when missing or when the source changed (a regenerated E7 GLB),
+   * Copies a plan's mesh file next to it when missing or when the source changed (a regenerated model),
    * so the served model always matches the committed one. Returns whether it wrote anything.
    */
   syncAsset(planId: string, name: string, sourcePath: string): boolean {
@@ -101,7 +101,7 @@ export class Store {
     return approved;
   }
 
-  /** Boot-time seeding of a plan that is already approved (the known-good desk plan, the E7 plan, fixtures). */
+  /** Boot-time seeding of a plan that is already approved (the blank plan; for tests, the desk and fixtures). */
   importApproved(plan: Plan): boolean {
     if (this.revisions(plan.plan_id).includes(plan.revision)) return false;
     writeJsonAtomic(join(this.planDir(plan.plan_id), `rev-${plan.revision}.json`), plan);

@@ -9,7 +9,7 @@ using UnityEngine;
 namespace CutOnce.Device
 {
     /// <summary>
-    /// The model files a plan's parts point to (shape.uri, e.g. e7.glb), read into meshes by node name. The server's copy
+    /// The model files a plan's parts point to (shape.uri, a .glb), read into meshes by node name. The server's copy
     /// comes first, because a newly approved plan brings its own; the app's bundled copy (Resources/CutOnce/&lt;uri&gt;.bytes)
     /// is the fallback when offline. Never throws: a file that cannot be had leaves those parts drawn as boxes.
     /// </summary>

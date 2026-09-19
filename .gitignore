@@ -6,8 +6,6 @@ dist/
 .env.*
 !.env.example
 data/runtime*/
-data/e7/raw/
-data/e7/stages/**/*.overlay.png
 backups/
 .DS_Store
 .claude/

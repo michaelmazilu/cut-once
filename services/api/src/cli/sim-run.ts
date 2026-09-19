@@ -31,7 +31,7 @@ if (!base) {
     dataDir, apiToken: token, host: "127.0.0.1", port: 0, logLevel: "silent",
     esUrl: "", esApiKey: "", kibanaUrl: "", mcpUrl: "", openaiKey: "", elevenKey: "", reconstruction: false,
     copilotMode: "fake", fakeCopilotDelayMs: 0,
-  defaultSeed: "demo_start",   // the simulations and push reports are about the desk; the app itself starts on E7
+  defaultSeed: "demo_start", testFixtures: true,   // the simulations and push reports use the desk test plan; the app starts blank
   });
   const app = await buildApp(cfg, plugins);
   await app.listen({ port: 0, host: "127.0.0.1" });

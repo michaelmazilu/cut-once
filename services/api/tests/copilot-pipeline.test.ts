@@ -343,26 +343,6 @@ describe("the demo cache", () => {
   });
 });
 
-describe("'build E7' by voice", () => {
-  it("starts the E7 run with no model, and says so; asked again, says it is already up", async () => {
-    transcribe.mockResolvedValue("Build E7");
-    const body = (await query()).json();
-    expect(body.answer_text).toBe("Here's Engineering 7, rebuilt from its 14 published drawings. Ask me about any part.");
-    expect(body.action).toBeNull();
-    expect(t.app.ctx.store.getAssembly(t.app.ctx.store.currentAssembly()!.assembly_id).plan_id).toBe("plan_e7_massing");
-    const runs = t.app.ctx.store.listAssemblies().length;
-    transcribe.mockResolvedValue("show me E7");
-    expect((await query()).json().answer_text).toBe("Engineering 7 is already up. Ask me about any part.");
-    expect(t.app.ctx.store.listAssemblies()).toHaveLength(runs);
-    expect([routeTurn.mock.calls.length, ask.mock.calls.length]).toEqual([0, 0]);
-  });
-  it("says it could not, instead of failing the turn, when E7 is not installed", async () => {
-    transcribe.mockResolvedValue("Build E7");
-    vi.spyOn(t.app.ctx.store, "getSeed").mockImplementation(() => { throw new Error("no seed e7_start"); });
-    const r = await query();
-    expect([r.statusCode, r.json().answer_text]).toEqual([200, "I couldn't open Engineering 7 on this server."]);
-  });
-});
 
 describe("the wish, from the first ask", () => {
   it("'build me a birdhouse' scans at once with the wish, and no model is asked", async () => {
@@ -408,7 +388,7 @@ describe("outside build mode: the router", () => {
     expect(body.action).toEqual({ type: "start_scan" });
     expect(ask).not.toHaveBeenCalled();
   });
-  it("an unsure router changes nothing: an E7 or desk question is answered as it always was", async () => {
+  it("an unsure router changes nothing: a question is answered as it always was", async () => {
     transcribe.mockResolvedValue("can we move this bracket up");
     routeTurn.mockResolvedValue({ flow: "build_ideas", confidence: 0.6 });
     ask.mockResolvedValue(draft());

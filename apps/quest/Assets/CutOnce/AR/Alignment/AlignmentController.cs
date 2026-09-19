@@ -66,7 +66,7 @@ namespace CutOnce.AR
         /// <summary>
         /// Build mode knows where the design goes (the server chose a spot beside the pile, facing the viewer), so it
         /// locks there directly. The lock is for this session only: it gets a spatial anchor of its own, but the anchor and
-        /// the nudge saved for E7 or the desk are left exactly as they were, so the next launch still finds them. Grip +
+        /// the nudge saved for the last build are left exactly as they were, so the next launch still finds them. Grip +
         /// stick nudges still work afterwards (and are not saved either). Pointing and pulling the trigger is the way to
         /// make a placement that lasts.
         /// </summary>
@@ -87,15 +87,15 @@ namespace CutOnce.AR
 
         /// <summary>
         /// Stands whatever is drawn now on a spot, as pointing at it would (the middle of its footprint on the point, its
-        /// lowest face on the surface), for this session only. Build mode uses it when another run takes over ("build
-        /// E7"): the new run appears on the build site, where the viewer is looking.
+        /// lowest face on the surface), for this session only. Build mode uses it when another run takes over:
+        /// the new run appears on the build site, where the viewer is looking.
         /// </summary>
         public void StandAt(Vector3 surfacePoint, float yawDegrees, string method) =>
             LockAt(PlacementMath.StandOn(surfacePoint, yawDegrees, LocalBounds(), _assembly.DisplayScale), method);
 
         void Update()
         {
-            if (_input == null || _assembly == null || _assembly.Plan == null) return;
+            if (_input == null || _assembly == null || _assembly.Plan == null || _assembly.Plan.parts.Count == 0) return;   // nothing built: nothing to place
             if (State == AlignmentState.Placing) Place();
             else if (State == AlignmentState.Locked) NudgeOrReplace();
         }

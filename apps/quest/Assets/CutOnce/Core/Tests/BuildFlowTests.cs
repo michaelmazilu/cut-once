@@ -43,7 +43,7 @@ namespace CutOnce.Core.Tests
             f.OnInventory(Inv(true));
             f.OnIdeas("bsess_a", new List<BuildIdeaDto> { Idea("idea_1", "plan_build_1") }, true);
             f.StartScan();                                  // a look-around scan is running when "build the can stage" is said
-            Assert.That(f.TryPlace("plan_e7_massing"), Is.False, "not one of the ideas");
+            Assert.That(f.TryPlace("plan_other"), Is.False, "not one of the ideas");
             Assert.That(f.Phase, Is.EqualTo(BuildPhase.Scanning));
             Assert.That(f.TryPlace("plan_build_1"), Is.True);
             Assert.That(new object[] { f.Phase, f.Chosen.idea_id }, Is.EqualTo(new object[] { BuildPhase.Starting, "idea_1" }));
@@ -178,7 +178,7 @@ namespace CutOnce.Core.Tests
         {
             var f = new BuildFlow();
             f.StartScan(); int first = f.ScanTicket;
-            f.Exit();                                       // the Director started E7 while the first scan was still uploading
+            f.Exit();                                       // the Director cleared the build while the first scan was still uploading
             Assert.That(f.ScanInFlight, Is.False, "leaving forgets the scan, so X works again at once");
             Assert.That(f.OnScanAccepted(first, "bsess_late"), Is.False, "its 202 arrives after all");
             Assert.That(new object[] { f.Active, f.SessionId }, Is.EqualTo(new object[] { false, null }));

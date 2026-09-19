@@ -14,8 +14,6 @@ export function scenes(): Scene[] {
     { name: "desk-all-built", url: p("plan=plan_desk_demo&built=all"), note: "Finished: brackets only" },
     { name: "desk-top", url: p(`plan=plan_desk_demo&built=${demoStart}&view=top`), note: "From above: layout and alignment" },
     { name: "desk-cable-answer", url: p(`plan=plan_desk_demo&built=${demoStart}&highlight=part_power_cable,part_cable_tray`), note: "What 'where does this cable go?' lights up" },
-    { name: "e7-full", url: p("plan=plan_e7_massing&built=all&view=orbit"), note: "E7 massing, complete" },
-    { name: "e7-half", url: p("plan=plan_e7_massing&replay=0.5&view=orbit"), note: "E7 halfway through its build" },
     { name: "sim-idle", url: "/sim?still=1&frame=render", note: "The pretend headset at rest, on the live run" },
   ];
   if (existsSync(join(CURRENT, "extracted.plan.json"))) {

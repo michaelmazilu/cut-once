@@ -84,7 +84,7 @@ export async function answerQuery(deps: Deps, input: QueryInput, log: Log): Prom
     }
   }
 
-  // Build mode: one Kit turn hears, sees and answers (OMNI by default, OpenAI behind a switch). E7 and the desk go on
+  // Build mode: one Kit turn hears, sees and answers (OMNI by default, OpenAI behind a switch). Other runs go on
   // below, exactly as before. With no provider at all, build mode falls through to the same 503 as they do.
   if (input.context.mode === "build" && ctx.hooks.build) {
     const kit = await kitTurn(deps, input, g, turnId, timings, t0, recordTurn, log);
@@ -192,7 +192,7 @@ function quick(
 /**
  * A spoken command, decided from the plan and the log with no model. A wish said outright ("build me a birdhouse")
  * rethinks the objects already known in build mode, with no new scan to wait for; otherwise the scan carries it
- * (null forgets it). "Build E7" starts its run. The server writes the event for a mark_state.
+ * (null forgets it). The server writes the event for a mark_state.
  */
 async function respondFast(
   deps: Deps, input: QueryInput, g: Gathered, fast: FastPath, transcript: string, turnId: string, timings: Record<string, number>, t0: number,
@@ -205,7 +205,6 @@ async function respondFast(
       fast.action = null;
     } else ctx.hooks.build.expectScan(fast.wish);
   }
-  if (fast.startRun) fast.answer_text = await startRun(ctx, g.plan.plan_id, fast.startRun, fast.answer_text, log);
   if (fast.action) await applyAction(deps, input.assemblyId, fast.action, "operator", { confidence: 1, note: fast.note ?? "spoken command" });
   speech.start(turnId, fast.answer_text);
   const response: CopilotResponse = {
@@ -288,21 +287,6 @@ async function kitTurn(
         log.warn({ turn: turnId, idea: decision.ideaId, err: (err as Error).message }, "could not start the picked build idea");
         return quick(deps, turnId, kit.heard, "I couldn't start that build. Try again.", null, timings, t0, recordTurn, true, said);
       }
-  }
-}
-
-/**
- * "Build E7": a new run from the seed, exactly as the Director's New run makes one. Asked while that run's plan is
- * already the current one, nothing restarts (its progress would be lost) and Kit says so.
- */
-async function startRun(ctx: Ctx, currentPlanId: string, run: NonNullable<FastPath["startRun"]>, said: string, log: Log): Promise<string> {
-  try {
-    if (ctx.store.getSeed(run.seed).plan_id === currentPlanId) return run.already;
-    await ctx.store.createAssembly({ seed: run.seed });
-    return said;
-  } catch (err) {
-    log.warn({ seed: run.seed, err: (err as Error).message }, "could not start a run by voice");
-    return run.failed;
   }
 }
 

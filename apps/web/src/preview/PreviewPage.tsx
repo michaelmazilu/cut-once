@@ -109,7 +109,7 @@ export function PreviewPage() {
           <p className="preview-hud-progress">{state.progress.built} of {state.progress.total} built</p>
           <div className="preview-hud-bar"><div style={{ width: `${state.progress.pct}%` }} /></div>
           <p className="preview-hud-step">{step ? `Step ${step.index} · ${step.title}` : state.progress.built === state.progress.total ? "Complete" : "No current step"}</p>
-          {/* Replays show order, not time: E7's step minutes are placeholders that only space the animation. */}
+          {/* Replays show order, not time: step minutes may be placeholders that only space the animation. */}
           {p.replay === null && state.progress.minutes_left > 0 && <p className="preview-hud-muted">about {Math.round(state.progress.minutes_left)} min left</p>}
           {compare && <p className="preview-hud-muted">White outline: {compare.name}</p>}
           <ul className="preview-legend">

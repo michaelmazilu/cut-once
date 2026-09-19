@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using CutOnce.AR;
@@ -26,18 +27,28 @@ namespace CutOnce.Device.PlayTests
         public static readonly Type AppType = Type.GetType("CutOnce.Device.CutOnceApp, Assembly-CSharp");
         public static Type BuildType => Type.GetType("CutOnce.Device.BuildMode, Assembly-CSharp");
 
-        // ── this machine's config and journal are moved aside, as E7DefaultTests does ───────────────────────────
+        // ── this machine's config and journal are moved aside; the app gets a closed port and, unless asked not to, a first run ──
         public sealed class Isolation
         {
-            readonly string _config = Path.Combine(Application.persistentDataPath, "cutonce.config.json"), _journal = Path.Combine(Application.persistentDataPath, "cutonce");
+            readonly string _config = Path.Combine(Application.persistentDataPath, "cutonce.config.json"), _journal = Path.Combine(Application.persistentDataPath, "cutonce-builds");
             string ConfigBackup => _config + ".before-build-test";
             string JournalBackup => _journal + ".before-build-test";
 
-            public Isolation()
+            /// <param name="firstRun">The app ships no plan, so a test that needs a hologram showing before build mode gets
+            /// one the way a headset that built before has one: a journal holding a run of the desk test plan (data/demo).</param>
+            public Isolation(bool firstRun = true)
             {
                 if (File.Exists(_config)) File.Move(_config, ConfigBackup);
                 if (Directory.Exists(_journal)) Directory.Move(_journal, JournalBackup);
                 File.WriteAllText(_config, "{\"server_url\":\"http://127.0.0.1:9\",\"api_token\":\"none\",\"device_id\":\"build-test\"}");   // port 9: nothing listens
+                if (!firstRun) return;
+                string planJson = File.ReadAllText(RepoFile("data", "demo", "desk.plan.json"));
+                var plan = CoreJson.Parse<PlanDto>(planJson);
+                new Journal(_journal).Save(new Journal.Snapshot
+                {
+                    assembly = new AssemblyDto { assembly_id = "asm_test_first_run", plan_id = plan.plan_id, plan_revision = plan.revision, name = "Test run", seed = "empty", status = "active" },
+                    plan_json = planJson,
+                });
             }
 
             public void Restore()
@@ -62,7 +73,7 @@ namespace CutOnce.Device.PlayTests
         public static IEnumerator UntilTheFirstRunShows()
         {
             for (float waited = 0f; waited < 15f && (Hologram() == null || Hologram().Views.Count == 0); waited += Time.unscaledDeltaTime) yield return null;
-            Assert.That(Hologram()?.Views.Count ?? 0, Is.GreaterThan(0), "the app's own first run (E7, offline) never loaded");
+            Assert.That(Hologram()?.Views.Count ?? 0, Is.GreaterThan(0), "the first run (the desk test plan, from the journal) never loaded");
         }
 
         public static IEnumerator Until(Func<bool> done, float seconds, string what)
@@ -100,15 +111,18 @@ namespace CutOnce.Device.PlayTests
         // ── what the server would send ──────────────────────────────────────────────────────────────────────────
         public static void Send(UnityEngine.Object mode, WsMessageDto message) => Call(mode, "OnBuildMessage", message);
 
-        static string FixturePath(params string[] parts)
+        /// <summary>A file in the repository (data/…), found by walking up from the Unity project.</summary>
+        public static string RepoFile(params string[] parts)
         {
             for (var dir = new DirectoryInfo(Application.dataPath); dir != null; dir = dir.Parent)
             {
-                string path = Path.Combine(Path.Combine(dir.FullName, "data", "fixtures"), Path.Combine(parts));
+                string path = Path.Combine(dir.FullName, Path.Combine(parts));
                 if (File.Exists(path)) return path;
             }
-            throw new FileNotFoundException("data/fixtures/" + string.Join("/", parts) + " was not found above " + Application.dataPath);
+            throw new FileNotFoundException(string.Join("/", parts) + " was not found above " + Application.dataPath);
         }
+
+        static string FixturePath(params string[] parts) => RepoFile(new[] { "data", "fixtures" }.Concat(parts).ToArray());
 
         public static string IdeasFixtureJson() => File.ReadAllText(FixturePath("build", "ws_build_ideas.json"));
 

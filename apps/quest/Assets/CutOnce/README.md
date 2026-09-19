@@ -13,8 +13,8 @@ app, and makes it the first scene in the build. There are no prefabs and no insp
    With neither, the app uses `http://127.0.0.1:8080`: fine in the Editor next to `pnpm dev`, useless on a headset.
    Use the `https://` tunnel address on the headset: Android blocks plain `http://` unless the app allows cleartext.
 2. **Cut Once > Rebuild main scene**, then Play (Meta XR Simulator on a laptop, or build to the Quest).
-3. With no server at all the app still runs: it loads the last run from its journal, or the bundled E7 plan (the
-   default run; the Director page's **New run** switches to the desk).
+3. With no server at all the app still runs: it loads the last run from its journal, or opens empty. The app ships no
+   plan: nothing is drawn until Kit builds something.
 
 ## Controls (right controller)
 
@@ -34,7 +34,7 @@ There are no QR codes, no markers and no calibration step.
 
 ### Build mode ("What can I build?")
 
-Off until a scan starts it, so E7 and the desk behave as above. The server does the thinking (`services/api/src/build`);
+Off until a scan starts it, so other runs behave as above. The server does the thinking (`services/api/src/build`);
 the headset scans, shows what comes back and flies the chosen design together.
 
 | When | Do | Result |
@@ -48,9 +48,8 @@ the headset scans, shows what comes back and flies the chosen design together.
 | Building | Say **"Done"**, or **B** with nothing pointed at | Marks the whole current step; the next step is read aloud |
 | Building | Everything in the table above | Unchanged: B on a part, next / back / undo, questions, grip to nudge |
 
-A design's lock is for this session only: it gets a spatial anchor of its own, but the anchor and nudge saved for E7 or
-the desk are left as they were, so the next launch still finds them. Another run started from the Director page ("build
-E7") ends build mode and stands on the build site, where the judge is looking. In the Editor there is no depth, so a
+A design's lock is for this session only: it gets a spatial anchor of its own, but the anchor and nudge saved for the last
+build are left as they were, so the next launch still finds them. Another run started from the Director page ends build mode and stands on the build site, where the judge is looking. In the Editor there is no depth, so a
 scan fails with "no depth here yet": replay a recorded scan from `/director` instead, and the twins, ideas and
 fly-together all show.
 
@@ -93,7 +92,7 @@ Decisions worth knowing before you change something:
   square the alpha and wash the hologram out.
 - **Colours come from `hologram-palette.json`**, generated from `HOLOGRAM_PALETTE` in `visual.ts`, so `/preview`, `/sim`
   and the headset match. The app carries a copy (a build cannot read outside `Assets`); `BundledFilesTests` fails when
-  the copy is stale and `pnpm quest:bundle` refreshes it. The same goes for the bundled desk plan.
+  the copy is stale and `pnpm quest:bundle` refreshes it. 
 - **Accuracy is visible.** A part tagged in `external_ids` with `source: assumed | inferred`, an unknown tolerance, or
   a tolerance above 5 cm draws **dashed**, and its card says so ("drawings, ±0.1 m"). An untagged part is a designed
   part: exact by definition.
@@ -101,7 +100,7 @@ Decisions worth knowing before you change something:
   rests on it (the desk's tabletop extends below y = 0). It uses the Quest 3's depth raycast when there is one and the
   floor plane otherwise, so it works in the simulator and needs no room scan.
 - **Buildings are tabletop models.** A plan wider than 4 m is shown at the largest architectural scale that keeps it
-  under 80 cm (E7, 91 m long, at 1:200). Everything scale-dependent (placement, nudge, collider padding, line width,
+  under 80 cm (a 91 m building at 1:200). Everything scale-dependent (placement, nudge, collider padding, line width,
   dashes, the proof overlay) is sized for the room, not the model. The HUD title shows the scale. Touch points are
   refused at tabletop scale; they are for overlaying at full size.
 - **Model files are read by our own `GlbReader`** (Core, tested under dotnet): a plan's mesh parts come from its `.glb`,

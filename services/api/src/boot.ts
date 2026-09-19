@@ -8,16 +8,30 @@ import type { Store } from "./store/store.js";
 
 const json = (p: string) => JSON.parse(readFileSync(p, "utf8"));
 
-/** Copies the committed demo data into DATA_DIR when it is missing, so a fresh VM or laptop starts out identical. */
+/** The plan a fresh app starts on: nothing to draw until Kit builds something. It gives the copilot a run to talk in. */
+export const blankPlan = (projectId: string): Plan => ({
+  plan_id: "plan_blank", project_id: projectId, name: "Nothing built yet", revision: 1, status: "approved",
+  frame: { handedness: "right", up: "+Y", units: "m", pose: "none", origin: "none" },
+  layers: [], parts: [], materials: [], steps: [], markers: [], touch_points: [],
+  provenance: { source_document_ids: [], extracted_by: "boot", approved_by: "boot", assumptions: [], validation: [] },
+});
+
+/**
+ * Prepares DATA_DIR. The app gets one blank plan and starts on it: no hologram until Kit builds one. The desk and the
+ * fixture plans are test data, loaded only with TEST_FIXTURES=on (the tests and simulations), never in the app.
+ */
 export async function boot(store: Store, docs: DocumentStore, cfg: Config, log: FastifyBaseLogger) {
+  store.importApproved(blankPlan(cfg.projectId));
+  store.putSeed({ seed: "blank", plan_id: "plan_blank", built: [] });
+
   const planFiles: string[] = [];
   const demo = join(cfg.repoRoot, "data", "demo");
-  if (existsSync(demo)) planFiles.push(...readdirSync(demo).filter((f) => f.endsWith(".plan.json")).map((f) => join(demo, f)));
-  const e7 = join(cfg.repoRoot, "data", "e7", "out", "e7.plan.json");
-  if (existsSync(e7)) planFiles.push(e7);
-  for (const f of ["plan_desk_archetype.json", "plan_asymmetric.json"]) {
-    const p = join(cfg.repoRoot, "data", "fixtures", f);
-    if (existsSync(p)) planFiles.push(p);
+  if (cfg.testFixtures) {
+    if (existsSync(demo)) planFiles.push(...readdirSync(demo).filter((f) => f.endsWith(".plan.json")).map((f) => join(demo, f)));
+    for (const f of ["plan_desk_archetype.json", "plan_asymmetric.json"]) {
+      const p = join(cfg.repoRoot, "data", "fixtures", f);
+      if (existsSync(p)) planFiles.push(p);
+    }
   }
   for (const file of planFiles) {
     const parsed = S.Plan.safeParse(json(file));
@@ -40,18 +54,18 @@ export async function boot(store: Store, docs: DocumentStore, cfg: Config, log: 
   }
 
   const seeds = join(demo, "seeds");
-  if (existsSync(seeds)) for (const f of readdirSync(seeds).filter((f) => f.endsWith(".json"))) {
+  if (cfg.testFixtures && existsSync(seeds)) for (const f of readdirSync(seeds).filter((f) => f.endsWith(".json"))) {
     const seed = S.Seed.safeParse(json(join(seeds, f)));
     if (seed.success) store.putSeed(seed.data);
   }
 
   const known = join(demo, "known_hashes.json");
-  if (existsSync(known)) docs.mergeKnown(json(known) as Record<string, KnownHash>);
+  if (cfg.testFixtures && existsSync(known)) docs.mergeKnown(json(known) as Record<string, KnownHash>);
 
-  // A fresh data folder starts with one run: the configured seed (E7 unless DEFAULT_SEED says otherwise), else the desk.
-  // An existing current run is never replaced here; the Director page's "New run" switches.
+  // A fresh data folder starts with one run: the configured seed (blank unless DEFAULT_SEED says otherwise), else blank.
+  // An existing current run is never replaced here.
   const seedNames = store.listSeeds();
-  const first = [cfg.defaultSeed, "demo_start"].find((s) => seedNames.includes(s));
+  const first = [cfg.defaultSeed, "blank"].find((s) => seedNames.includes(s));
   if (!store.currentAssembly() && first) {
     try { const a = await store.createAssembly({ seed: first }); log.info({ assembly_id: a.assembly_id, seed: first }, "created the first run"); }
     catch (err) { log.warn({ err, seed: first }, "could not create the first run"); }
