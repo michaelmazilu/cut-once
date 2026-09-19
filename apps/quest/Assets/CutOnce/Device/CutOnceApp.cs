@@ -29,7 +29,7 @@ namespace CutOnce.Device
         /// <summary>Where the run is kept between launches (Application.persistentDataPath). Tests set it aside.</summary>
         public const string JournalFolder = "cutonce-builds";
         /// <summary>What the HUD says while nothing is built: the app shows no hologram until Kit builds one.</summary>
-        public const string IdleHint = "Look at some things and say \"What can I build?\", or press X to scan.";
+        public const string IdleHint = "Press A and ask Kit anything — \"What can I build?\" — then press A again to send.";
 
         const float HighlightSeconds = 6f, RetrySeconds = 5f, WrongHoldSeconds = 0.8f, ScanButtonHoldSeconds = 1f;
 
@@ -93,7 +93,7 @@ namespace CutOnce.Device
                 _hud.gameObject.SetActive(!active);
                 _waitForMarkRelease = true;
             };
-            _hud.Toast("X: scan the room, measure and draw objects", 12f);
+            _hud.Toast("A: talk to Kit. Press once to start, again to send. Ask \"What can I build?\" and it does the rest.", 12f);
             // Build mode ("what can I build?"): off until a scan starts it, so other runs behave exactly as before.
             _build = gameObject.AddComponent<BuildMode>();
             _build.Init(_config, _api, _sync, _store, _assembly, _alignment, _input, surface, _hud, _material, _palette);
@@ -340,13 +340,17 @@ namespace CutOnce.Device
         }
 
         /// <summary>
-        /// The copilot's camera (AGENTS rule 1). On the headset, Meta's PassthroughCameraAccess. In the Editor, the stored
-        /// photo: the simulator's camera gives a pose but no pixels on a Mac, and the API does not run over Quest Link.
-        /// `pnpm sync:fixtures` puts the photo in StreamingAssets; without it the copilot asks with no frame.
+        /// The copilot's camera (AGENTS rule 1). On the headset, Meta's PassthroughCameraAccess. In the Editor it
+        /// depends on what is plugged in: over Meta Horizon Link with a Quest 3, MRUK 205 hands the Editor the real
+        /// passthrough camera, so Kit sees the actual room while you run from Unity. With no headset (a Mac, or the
+        /// simulator, which gives a pose but no pixels) it is the stored photo instead: `pnpm sync:fixtures` puts that
+        /// in StreamingAssets, and without it the copilot asks with no frame at all.
         /// </summary>
         static MonoBehaviour AddCameraSource(GameObject go)
         {
-            if (Application.isEditor) return go.AddComponent<FixtureFrameSource>();
+            var headset = OVRPlugin.GetSystemHeadsetType();
+            var linked = headset is OVRPlugin.SystemHeadset.Meta_Link_Quest_3 or OVRPlugin.SystemHeadset.Meta_Link_Quest_3S;
+            if (Application.isEditor && !linked) return go.AddComponent<FixtureFrameSource>();
             var frames = go.AddComponent<PcaFrameSource>();
             // MRUK allows ONE PassthroughCameraAccess per camera position: a second one logs an error, disables itself
             // and leaves whoever asked second blind for the session. The room scanner starts before us (AfterSceneLoad),

@@ -53,7 +53,7 @@ If the headset isn't on yet, Rhythm fills: "While that goes on: when did you las
 
 **Scan and ask (about 40 seconds)**
 
-**Henry:** "Look at the table. Hold A on your right controller and ask Kit: what can I build?"
+**Henry:** "Look at the table. Press A on your right controller, ask Kit — what can I build? — and press A again."
 
 *The judge asks. "Scanning… hold still." Outlines appear around every object, then each one gets a name and a size.*
 
@@ -67,7 +67,7 @@ If the headset isn't on yet, Rhythm fills: "While that goes on: when did you las
 
 *The holograms fly off the real objects and form the birdhouse. Step one, the can, glows, and Kit reads it out.*
 
-**Henry:** "Pick up the real can and stand it inside its hologram." *The judge does.* "Now hold A and say: done."
+**Henry:** "Pick up the real can and stand it inside its hologram." *The judge does.* "Now press A, say done, press A again."
 
 *Step two glows, and Kit reads it out.*
 
@@ -75,7 +75,7 @@ If the headset isn't on yet, Rhythm fills: "While that goes on: when did you las
 
 **Something crazier (about 25 seconds)**
 
-**Henry:** "Hold A and ask Kit for something crazier."
+**Henry:** "Press A and ask Kit for something crazier."
 
 **Rhythm** (while it works): "Nobody wrote this design. OpenAI is inventing it live from the same objects, and our solver fits it to their measured sizes, so the real pieces actually fit."
 

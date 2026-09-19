@@ -39,7 +39,7 @@ namespace CutOnce.Vision
                 if (Detector != null && !string.IsNullOrEmpty(Detector.LastError)) return "detector error: " + Detector.LastError;
                 if (Camera == null || !Camera.IsReady) return _status;
                 if (Detector == null || !Detector.ModelLoaded) return "camera up, model not loaded yet";
-                if (!Locator.IsSupported) return "scanning (no depth — positions will fail)";
+                if (!Locator.IsSupported) return "scanning (no depth — objects sit on the room's surfaces, not on themselves)";
                 return $"scanning — {Detector.InferencesPerSecond:0.0}/s, {Tracker.VisibleCount} objects";
             }
         }

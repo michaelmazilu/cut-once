@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Meta.XR;
+using Meta.XR.MRUtilityKit;
 using UnityEngine;
 
 namespace CutOnce.Vision
@@ -46,6 +47,9 @@ namespace CutOnce.Vision
         public float minDistance = 0.2f;   // Quest depth is unreliable closer than this
         public float maxDistance = 6f;     // official guidance: limited accuracy beyond ~4m
 
+        [Tooltip("Used only where there is no depth sensing (running from the Editor over Link): how far down the ray to put an object the room's own planes did not catch.")]
+        public float fallbackDistance = 2f;
+
         public int LastAttempts { get; private set; }
         public int LastSuccesses { get; private set; }
         public string LastFailureReason { get; private set; } = "";
@@ -70,6 +74,28 @@ namespace CutOnce.Vision
         }
 
         /// <summary>
+        /// Where there is no depth sensing — running from the Editor over Meta Horizon Link, or a simulator without
+        /// it — an object still gets a place, so the room lights up and the pipeline can be watched end to end. It
+        /// lands on the room's own surfaces (MRUK's planes and volumes), which means the desk UNDER the bottle or the
+        /// wall BEHIND it, not the bottle: near enough to see it working, never good enough to build from. Says so.
+        /// </summary>
+        bool LocateWithoutDepth(Ray centreRay, out Vector3 world)
+        {
+            if (!_warnedNoDepth)
+            {
+                _warnedNoDepth = true;
+                Debug.LogWarning("[Vision] no depth sensing here: objects are placed on the room's surfaces (the desk under a thing, or the wall behind it), " +
+                                 "not on the thing itself. Real positions need the headset.");
+            }
+            var room = MRUK.Instance != null ? MRUK.Instance.GetCurrentRoom() : null;
+            if (room != null && room.Raycast(centreRay, maxDistance, out var hit)) { world = hit.point; return true; }
+            world = centreRay.origin + centreRay.direction * fallbackDistance;
+            return true;
+        }
+
+        bool _warnedNoDepth;
+
+        /// <summary>
         /// World position of a detection, or false if the room did not answer. <paramref name="cameraPose"/>
         /// must be the pose captured with the frame the detection came from.
         /// </summary>
@@ -77,13 +103,16 @@ namespace CutOnce.Vision
         {
             world = default;
             LastAttempts++;
-            if (_raycast == null) { LastFailureReason = "no raycast manager"; return false; }
-
             var box = detection.boundingBox;
             var size = detection.inputSize;
             if (size.x <= 0f || size.y <= 0f) { LastFailureReason = "bad input size"; return false; }
 
             var centreRay = RayThrough(box.center, size, cameraPose);
+            if (_raycast == null)                                    // no depth sensing: the room's surfaces instead of nothing at all
+            {
+                LastSuccesses++;
+                return LocateWithoutDepth(centreRay, out world);
+            }
             var forward = cameraPose.rotation * Vector3.forward;
 
             _distances.Clear();
