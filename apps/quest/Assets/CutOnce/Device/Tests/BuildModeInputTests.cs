@@ -19,7 +19,7 @@ namespace CutOnce.Device.PlayTests
         Isolation _isolation;
 
         [SetUp] public void SetUp() => _isolation = new Isolation();
-        [TearDown] public void TearDown() => _isolation.Restore();
+        [TearDown] public void TearDown() => _isolation?.Restore();
 
         [UnityTearDown]
         public IEnumerator DestroyWhatTheAppCreated()
@@ -74,7 +74,7 @@ namespace CutOnce.Device.PlayTests
             yield return PullTrigger(input);
             Assert.That(Phase(mode), Is.EqualTo(BuildPhase.Ideas));
             Assert.That(preview != null, Is.True, "the very same previews are still there to pick from, not cleared and rebuilt by a rescan");
-            Assert.That(Toast(), Does.Not.Contain("scan").IgnoreCase, "no scan was started");
+            Assert.That(Toast(), Does.Not.Contain("Scanning"), "no scan was started");   // build mode's own scan message; the app's start-up hint mentions X for scanning
             Assert.That(server.Requests, Is.Empty);
 
             // Reaching into the preview and pulling the trigger: physics never reports a collider the ray starts inside.

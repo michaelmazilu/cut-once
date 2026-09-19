@@ -19,7 +19,7 @@ namespace CutOnce.Device.PlayTests
         Isolation _isolation;
 
         [SetUp] public void SetUp() => _isolation = new Isolation();
-        [TearDown] public void TearDown() => _isolation.Restore();
+        [TearDown] public void TearDown() => _isolation?.Restore();
 
         [UnityTearDown]
         public IEnumerator DestroyWhatTheAppCreated()

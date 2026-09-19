@@ -38,8 +38,11 @@ namespace CutOnce.Device.PlayTests
             /// one the way a headset that built before has one: a journal holding a run of the desk test plan (data/demo).</param>
             public Isolation(bool firstRun = true)
             {
-                if (File.Exists(_config)) File.Move(_config, ConfigBackup);
-                if (Directory.Exists(_journal)) Directory.Move(_journal, JournalBackup);
+                // A backup already there is from a run that crashed before restoring: it holds this machine's real files, so keep
+                // it and drop the test leftovers instead of failing every test after it.
+                if (File.Exists(ConfigBackup)) File.Delete(_config); else if (File.Exists(_config)) File.Move(_config, ConfigBackup);
+                if (Directory.Exists(JournalBackup)) { if (Directory.Exists(_journal)) Directory.Delete(_journal, true); }
+                else if (Directory.Exists(_journal)) Directory.Move(_journal, JournalBackup);
                 File.WriteAllText(_config, "{\"server_url\":\"http://127.0.0.1:9\",\"api_token\":\"none\",\"device_id\":\"build-test\"}");   // port 9: nothing listens
                 if (!firstRun) return;
                 string planJson = File.ReadAllText(RepoFile("data", "demo", "desk.plan.json"));

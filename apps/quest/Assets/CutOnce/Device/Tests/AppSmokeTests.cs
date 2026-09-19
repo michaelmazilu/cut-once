@@ -21,11 +21,15 @@ namespace CutOnce.Device.PlayTests
         /// (the app makes AssemblyRoot, [Pointer] and the HUD as separate root objects). A leftover copilot would make
         /// the next app skip building its own.
         /// </summary>
+        BuildModeHarness.Isolation _isolation;
+
         [UnityTearDown]
         public IEnumerator DestroyWhatTheAppCreated()
         {
             DestroyAppObjects();
             yield return null;                                                   // Destroy takes effect at the end of the frame
+            yield return null;
+            _isolation?.Restore(); _isolation = null;                      // after the app is gone, so it writes no journal afterwards
         }
 
         /// <summary>Shared with the build-mode tests. Build mode's two roots go with their app; by name too, in case its OnDestroy never ran.</summary>
@@ -43,8 +47,7 @@ namespace CutOnce.Device.PlayTests
         [UnityTest]
         public IEnumerator OfflineWithNoJournalTheAppComesUpEmptyAndSaysWhatToDo()
         {
-            var isolation = new BuildModeHarness.Isolation(firstRun: false);
-            try
+            _isolation = new BuildModeHarness.Isolation(firstRun: false);
             {
                 var type = Type.GetType("CutOnce.Device.CutOnceApp, Assembly-CSharp");
                 Assert.That(type, Is.Not.Null, "CutOnceApp is missing from Assembly-CSharp");
@@ -61,7 +64,6 @@ namespace CutOnce.Device.PlayTests
                 Assert.That(status, Does.Contain("What can I build?"));
                 UnityEngine.Object.Destroy(go);
             }
-            finally { isolation.Restore(); }
         }
 
         [UnityTest]

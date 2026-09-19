@@ -11,7 +11,7 @@ namespace CutOnce.Room
         Material _material;
         readonly List<GameObject> _map = new List<GameObject>();
         readonly List<LineRenderer> _drawings = new List<LineRenderer>();
-        readonly MaterialPropertyBlock _colour = new MaterialPropertyBlock();
+        MaterialPropertyBlock _colour;                                  // made in Awake: Unity forbids it in a field initializer
         Transform _frame, _panel;
         UnityEngine.UI.Text _text;
         LineRenderer _pointer, _preview;
@@ -19,6 +19,7 @@ namespace CutOnce.Room
 
         void Awake()
         {
+            _colour = new MaterialPropertyBlock();
             _material = HologramMaterial.Create();
             _material.SetFloat("_EdgeMode", 3);
             _material.SetColor("_FillColor", Color.clear);
@@ -114,7 +115,7 @@ namespace CutOnce.Room
             _preview.positionCount = count;
             for (int i = 0; i < count; i++) _preview.SetPosition(i, frame.TransformPoint(points[i]));
         }
-        public void CancelPreview() => _preview.positionCount = 0;
+        public void CancelPreview() { if (_preview != null) _preview.positionCount = 0; }
         public void Add(RoomDrawing drawing)
         {
             var line = Line(drawing.tool.ToString(), _frame, drawing.tool == DrawingTool.Measure ? Amber : Cyan, .004f);
