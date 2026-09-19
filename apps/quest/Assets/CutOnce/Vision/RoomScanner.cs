@@ -129,7 +129,7 @@ namespace CutOnce.Vision
             {
                 if (_paused == value) return;
                 _paused = value;
-                if (Detector != null) Detector.enabled = !value;
+                if (Detector != null) Detector.Paused = value;
                 if (value && Visualizer != null && Tracker != null) foreach (var o in Tracker.Objects) Visualizer.Hide(o);
             }
         }

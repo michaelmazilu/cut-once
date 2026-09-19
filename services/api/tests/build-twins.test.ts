@@ -35,6 +35,17 @@ describe("a wall right behind the table (a kitchen counter's backsplash)", () =>
   });
 });
 
+describe("something standing behind something else", () => {
+  it("keeps a tall object whose foot is hidden: only what stands ON the surface reaches down to it", () => {
+    // A 40 cm bottle behind a 30 cm box shows only its neck, so its lowest SEEN point is 30 cm above the table. The
+    // rule that throws away a patch of wall seen over the table's far edge must not throw this away too.
+    const scene = [FLOOR, TABLE, box(0, 0.45, 0.25, 0.3, 0.15), can(0, 0.7, 0.033, 0.4)];
+    const { twins } = run(scene, 0.004);
+    const bottle = twins.find((t) => Math.abs(heightOf(t.shape) - 0.4) < 0.06);
+    expect([twins.length, bottle !== undefined]).toEqual([2, true]);
+  });
+});
+
 describe("objects on the table and the floor", () => {
   const scene = [FLOOR, TABLE, box(-0.2, 0.55, 0.3, 0.1, 0.2), can(0.15, 0.5), box(0.45, 0.02, 0.35, 0.3, 0.25, 0)];
 

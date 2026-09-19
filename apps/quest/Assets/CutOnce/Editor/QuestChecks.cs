@@ -78,6 +78,8 @@ namespace CutOnce.QuestTools
                 "Colour space must be Linear, or every colour on the headset differs from the palette.");
             Expect(f, "network", PlayerSettings.insecureHttpOption == InsecureHttpOption.AlwaysAllowed,
                 "Plain http must be allowed, or the headset cannot reach the laptop server over Wi-Fi (the Editor can, so this only fails on the Quest).");
+            Expect(f, "android", QuestSetup.GetPlayerFlag(QuestSetup.CustomManifestFlag),
+                "Custom Main Manifest must be on, or Assets/Plugins/Android/AndroidManifest.xml — which declares the headset camera and allows the plain http the laptop server speaks — may not reach the APK.");
             Expect(f, "simulator", PlayerSettings.runInBackground,
                 "Run In Background must be on, or Play mode pauses whenever the simulator window has focus.");
             Expect(f, "android", PlayerSettings.GetApplicationIdentifier(android) == QuestSetup.ApplicationId,

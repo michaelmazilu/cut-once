@@ -45,6 +45,9 @@ namespace CutOnce.Vision
         [Tooltip("Only for a model whose head already gives corners (x1,y1,x2,y2). YOLO gives centre+size.")]
         public bool cornerBoxes;
 
+        /// <summary>No inference while this is set; the loop keeps waiting, so it can be turned back on.</summary>
+        public bool Paused { get; set; }
+
         private bool _loggedRawBox;
 
         /// <summary>Detections, plus the camera pose and input size they were computed against.</summary>
@@ -117,10 +120,12 @@ namespace CutOnce.Vision
                 yield return null;
             }
 
-            while (enabled)
+            while (true)
             {
                 var minInterval = maxInferencesPerSecond > 0f ? 1f / maxInferencesPerSecond : 0f;
-                if (_camera == null || !_camera.IsReady || !_camera.HasFreshFrame ||
+                // Paused, not stopped. Unity does not stop a coroutine when its component is disabled, and Start()
+                // runs once per component, so leaving the loop here would end detection for the rest of the session.
+                if (Paused || _camera == null || !_camera.IsReady || !_camera.HasFreshFrame ||
                     Time.time - _lastInferenceStartedAt < minInterval)
                 {
                     yield return null;

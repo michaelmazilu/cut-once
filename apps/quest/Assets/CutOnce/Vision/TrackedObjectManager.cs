@@ -31,8 +31,14 @@ namespace CutOnce.Vision
     /// </summary>
     public class TrackedObjectManager : MonoBehaviour
     {
-        [Tooltip("Same class within this many metres is treated as the same physical object. Wide enough for depth jitter across a room: a miss makes a DUPLICATE, which is worse than a slightly greedy match (a jump is rejected separately).")]
-        public float associationDistance = 0.75f;
+        [Tooltip("Same class within this many metres is treated as the same physical object, close up. A miss makes a DUPLICATE, so it grows with range (below), where depth jitter does too.")]
+        public float associationDistance = 0.25f;
+
+        [Tooltip("Added to the above per metre of range. Two cans on one counter are 12 cm apart and must stay two; the same can across the room jitters by tens of centimetres and must stay one.")]
+        public float associationPerMetre = 0.1f;
+
+        [Tooltip("The most the two above may add up to.")]
+        public float associationMaxDistance = 0.75f;
 
         [Tooltip("Detections needed before an object becomes visible. Suppresses one-frame false positives.")]
         public int hitsBeforeVisible = 3;
@@ -43,8 +49,8 @@ namespace CutOnce.Vision
         [Tooltip("EMA weight for new measurements. Lower = steadier but slower to follow.")]
         [Range(0.05f, 1f)] public float positionSmoothing = 0.25f;
 
-        [Tooltip("A measurement further than this from the tracked position is treated as a bad depth sample and ignored.")]
-        public float jumpRejectDistance = 1.0f;
+        [Tooltip("A measurement further than this from the tracked position is treated as a bad depth sample and ignored. Under the association reach, or it could never fire on a sighting that matched.")]
+        public float jumpRejectDistance = 0.5f;
 
         public IReadOnlyList<TrackedObject> Objects => _objects;
         public int VisibleCount { get; private set; }
@@ -114,10 +120,18 @@ namespace CutOnce.Vision
                 if (!observedIds.Contains(o.id)) o.consecutiveHits = 0;
         }
 
+        /// <summary>How far away a sighting may be and still be the same thing: wider the further away it is.</summary>
+        private float Reach(Vector3 world)
+        {
+            var eye = Camera.main;
+            var range = eye != null ? Vector3.Distance(eye.transform.position, world) : 1f;
+            return Mathf.Min(associationDistance + associationPerMetre * range, associationMaxDistance);
+        }
+
         private TrackedObject FindNearest(int classId, Vector3 world)
         {
             TrackedObject best = null;
-            var bestDistance = associationDistance;
+            var bestDistance = Reach(world);
             foreach (var o in _objects)
             {
                 if (o.classId != classId) continue;

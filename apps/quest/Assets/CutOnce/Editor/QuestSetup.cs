@@ -64,6 +64,10 @@ namespace CutOnce.QuestTools
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
             PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.Vulkan });
             PlayerSettings.colorSpace = ColorSpace.Linear;
+            // Assets/Plugins/Android/AndroidManifest.xml is ours: it declares the headset camera, the microphone and
+            // plain http. There is no scripting API for the flag that makes Unity use it, so it is set as the
+            // Inspector does — through the serialised settings asset.
+            SetPlayerFlag(CustomManifestFlag, true);
             // The laptop server on the venue Wi-Fi is plain http; Android refuses that unless it is allowed here.
             PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
             // Otherwise Play mode pauses whenever the simulator window has focus.
@@ -203,6 +207,33 @@ namespace CutOnce.QuestTools
             config.sceneSupport = OVRProjectConfig.FeatureSupport.Required; // room mapping and scene mesh queries
             config.handTrackingSupport = OVRProjectConfig.HandTrackingSupport.ControllersAndHands;
             OVRProjectConfig.CommitProjectConfig(config);
+        }
+
+        /// <summary>The Player setting that makes Unity build Assets/Plugins/Android/AndroidManifest.xml into the APK.</summary>
+        public const string CustomManifestFlag = "useCustomMainManifest";
+
+        static SerializedObject PlayerSettingsAsset()
+        {
+            var asset = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset");
+            return asset.Length > 0 ? new SerializedObject(asset[0]) : null;
+        }
+
+        /// <summary>Reads a Player setting that has no scripting API. Missing (a Unity that renamed it): true, so a check cannot fail on nothing.</summary>
+        public static bool GetPlayerFlag(string property)
+        {
+            var found = PlayerSettingsAsset()?.FindProperty(property);
+            return found == null || found.boolValue;
+        }
+
+        /// <summary>Writes one, the way the Inspector does.</summary>
+        public static void SetPlayerFlag(string property, bool value)
+        {
+            var settings = PlayerSettingsAsset();
+            var found = settings?.FindProperty(property);
+            if (found == null) { Debug.LogWarning($"[CutOnce] Player setting {property} not found; set it in Player Settings by hand."); return; }
+            found.boolValue = value;
+            settings.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.SaveAssets();
         }
     }
 }

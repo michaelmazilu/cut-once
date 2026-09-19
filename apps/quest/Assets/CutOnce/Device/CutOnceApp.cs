@@ -108,9 +108,10 @@ namespace CutOnce.Device
             // and microphone. Ask on the headset before first use (the Editor grants at once). The camera waits for its
             // grant by itself; a refusal only costs the copilot its eyes or ears, so the HUD says what still works.
             // Depth rays (build mode, and pointing at a real table to place a build) need spatial data, copilot or not.
+            // The camera is always wanted: the copilot asks with a photo, and the room scanner names what it sees.
             var wanted = FindAnyObjectByType<CopilotController>() != null
                 ? new[] { QuestPermissions.Camera, QuestPermissions.Microphone, QuestPermissions.Scene }
-                : new[] { QuestPermissions.Scene };
+                : new[] { QuestPermissions.Camera, QuestPermissions.Scene };
             QuestPermissions.Request(wanted, (p, ok) => _permissionAnswers.Enqueue((p, ok)));
         }
 
@@ -350,7 +351,8 @@ namespace CutOnce.Device
             // MRUK allows ONE PassthroughCameraAccess per camera position: a second one logs an error, disables itself
             // and leaves whoever asked second blind for the session. The room scanner starts before us (AfterSceneLoad),
             // so share whatever is already there. One camera, both readers: its texture for the scanner, its pixels for us.
-            frames.cameraAccess = FindAnyObjectByType<Meta.XR.PassthroughCameraAccess>() ?? go.AddComponent<Meta.XR.PassthroughCameraAccess>();
+            var shared = FindAnyObjectByType<Meta.XR.PassthroughCameraAccess>();
+            frames.cameraAccess = shared != null && shared.enabled ? shared : go.AddComponent<Meta.XR.PassthroughCameraAccess>();
             return frames;
         }
     }

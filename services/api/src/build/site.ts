@@ -50,6 +50,9 @@ export function chooseSite(surface: Surface, pile: Box2, design: { w: number; d:
   const beside = candidates.find((q) => fits(q, theta) && clear(q, theta));
   if (beside) return site(beside, theta);
   let best: { c: P2; th: number; d: number } | null = null, least: { c: P2; th: number; d: number; area: number } | null = null;
+  // The least any spot covers, which only ever falls: comparing against the last one ACCEPTED would let the bar drift
+  // up a spot at a time, and the design could end up covering much more than the tie was ever meant to allow.
+  let leastArea = Infinity;
   const r = rectOf(surface), t = (r.yawDeg * Math.PI) / 180, cs = Math.cos(t), sn = Math.sin(t), STEP = 0.04;
   for (let u = -r.len / 2; u <= r.len / 2; u += STEP) for (let w = -r.wid / 2; w <= r.wid / 2; w += STEP) {
     const c: P2 = [r.cx + u * cs + w * sn, r.cz - u * sn + w * cs], th = facing(c), d = Math.hypot(c[0] - pc[0], c[1] - pc[1]);
@@ -60,7 +63,8 @@ export function chooseSite(surface: Surface, pile: Box2, design: { w: number; d:
     // along the room's axes, which swells by up to 40% as the turn goes diagonal, so near-equal areas are a tie and
     // the nearer spot wins.
     const tie = 0.25 * design.w * design.d;
-    if (!least || area < least.area - tie || (area < least.area + tie && d < least.d)) least = { c, th, d, area };
+    if (area < leastArea) leastArea = area;
+    if (!least || area < least.area - tie || (area < leastArea + tie && d < least.d)) least = { c, th, d, area };
   }
   if (best) return site(best.c, best.th);
   if (least) return site(least.c, least.th);

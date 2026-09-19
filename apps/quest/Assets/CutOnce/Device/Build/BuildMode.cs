@@ -105,6 +105,7 @@ namespace CutOnce.Device
             _flow.ScanFailed(ticket);
             if (_flow.Phase == BuildPhase.Ideas) ShowPreviews();             // a look-around scan that failed: the ideas are still good
             ShowOrHideHologram();
+            if (!_flow.Active) ScannerRunning(true);                          // the first scan failed, so build mode is off again: the room is the scanner's
         }
 
         async Task Upload(BuildScanUploadDto scan, int ticket)

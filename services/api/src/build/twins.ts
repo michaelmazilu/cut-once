@@ -31,7 +31,7 @@ export const OPTIONS = {
   minObjectHeight: 0.015,
   minObjectHeightPerMetre: 0.012, // taller than the noise at that range, or it is a bump in the depth map
   maxObjectSize: 1.5,             // bigger than this is furniture or a wall
-  restingGap: 0.25,               // how far above its surface an object's lowest seen point may be (the rest is hidden behind something)
+  restingGap: 0.45,               // how far above its surface an object's lowest seen point may be (the rest is behind whatever stands in front)
 };
 export type Options = typeof OPTIONS;
 
@@ -341,8 +341,9 @@ function fit(v: View, cloud: Cloud, body: Body, surfaces: Surface[], scanId: str
   const cx = sx / cells.length, cz = sz / cells.length;
   const base = surfaces.filter((s) => s.y <= body.minY + 0.03 && standsOn(s, cx, cz)).sort((a, b) => b.y - a.y)[0];
   if (!base) return null;                                            // floating: a wall, a person, a lamp
-  // Something ON a table reaches down to it. Part of it may be hidden behind something in front, but a patch that
-  // starts well above the top — a piece of the wall behind, seen over the table's far edge — is not standing on it.
+  // Something ON a table reaches down to it. Part of it may be hidden behind something in front — a bottle behind a
+  // cereal box shows only its neck — so this is generous: it is here for the patch of WALL seen over the table's far
+  // edge, which starts most of a metre up and is not standing on anything.
   if (body.minY - base.y > opts.restingGap) return null;
   const ys = cells.map(v.y).sort((a, b) => a - b);
   const top = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.95))]!, height = top - base.y;
