@@ -5,7 +5,8 @@ import { ulid } from "ulid";
 import { partAabb, resolveVisuals } from "@cutonce/project-model";
 import type { Assembly, BuildState, CopilotResponse, PartState, Plan } from "@cutonce/schemas";
 import {
-  askCopilot, authHeaders, describeError, fetchAnswerAudio, getCurrentAssembly, getPlan, getState, planAssetUrl, postEvent,
+  askCopilot, authHeaders, describeError, fetchAnswerAudio, getBuildCurrent, getCurrentAssembly, getPlan, getState, planAssetUrl, postEvent,
+  replayBuildScan,
 } from "../api";
 import { HologramView } from "../three/hologram/HologramView";
 import { useStream } from "../ws";
@@ -16,18 +17,26 @@ import { silentWav, startRecording, type Recording } from "./micWav";
 type Status = { kind: "idle" | "listening" | "thinking" | "info" | "error"; text: string };
 const IDLE: Status = { kind: "idle", text: "Point at a part. Hold Space to ask." };
 const HIGHLIGHT_MS = 6000;
+/** A run build mode started (services/api/src/build/plan.ts names its plans so). Any other run ends build mode. */
+const isBuildRun = (planId: string) => planId.startsWith("plan_build_");
 
 /**
  * /sim: a pretend headset on the laptop. The mouse is the controller ray, B marks built, hold Space to ask
  * through the laptop mic. It sends the server exactly what the Quest will: the same events, the same
  * context packet, a recorded question and one camera frame. So the copilot and the history can be tested
  * without the headset. What it can't test: alignment on the real desk, and how the headset itself draws.
+ *
+ * Build mode (K, ?mode=build, or any answer that asks for a scan) makes every turn Kit's, as on the headset. The
+ * laptop has no depth camera, so a scan replays a recording (?kit=synthetic_kit) with its saved names.
  */
 export function SimPage() {
   const location = useLocation();
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const still = params.get("still") === "1";
+  const recording = params.get("kit") ?? "synthetic_kit";
   const [frameSource, setFrameSource] = useState<FrameSource>(params.get("frame") === "webcam" ? "webcam" : "render");
+  const [buildMode, setBuildMode] = useState(params.get("mode") === "build");
+  const [kit, setKit] = useState<{ wish: string | null; designs: string[]; note: string | null }>({ wish: null, designs: [], note: null });
 
   const [run, setRun] = useState<Assembly | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -37,9 +46,9 @@ export function SimPage() {
   const [answer, setAnswer] = useState<CopilotResponse | null>(null);
   const [highlight, setHighlight] = useState<string[]>([]);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const recording = useRef<Recording | null>(null);
-  const live = useRef({ run, plan, state, pointed, frameSource });
-  live.current = { run, plan, state, pointed, frameSource };
+  const mic = useRef<Recording | null>(null);
+  const live = useRef({ run, plan, state, pointed, frameSource, buildMode });
+  live.current = { run, plan, state, pointed, frameSource, buildMode };
 
   const load = useCallback(async (assembly?: Assembly) => {
     const a = assembly ?? await getCurrentAssembly();
@@ -50,9 +59,18 @@ export function SimPage() {
   useEffect(() => () => stopWebcam(), []);
 
   useStream((msg) => {
-    if (msg.type === "assembly_changed") void load(msg.assembly).catch((e) => setStatus({ kind: "error", text: describeError(e) }));
-    else if (msg.type === "event_appended" && msg.assembly_id === live.current.run?.assembly_id) {
+    if (msg.type === "assembly_changed") {
+      // As on the headset: a run build mode did not start (E7, the desk) ends build mode.
+      if (live.current.buildMode && !isBuildRun(msg.assembly.plan_id)) setBuildMode(false);
+      void load(msg.assembly).catch((e) => setStatus({ kind: "error", text: describeError(e) }));
+    } else if (msg.type === "event_appended" && msg.assembly_id === live.current.run?.assembly_id) {
       void getState(msg.assembly_id).then(setState).catch((e) => setStatus({ kind: "error", text: describeError(e) }));
+    } else if (msg.type === "build_inventory" && msg.inventory.message) {
+      setKit((k) => ({ ...k, note: msg.inventory.message }));
+    } else if (msg.type === "build_ideas" && msg.final) {
+      setKit((k) => ({ ...k, designs: msg.ideas.map((i) => i.title), note: msg.message ?? k.note }));
+      // The wish is not on the stream: ask for it when a list is final.
+      void getBuildCurrent().then((c) => setKit((k) => ({ ...k, wish: c.wish })), () => {});
     }
   });
 
@@ -74,7 +92,7 @@ export function SimPage() {
   }, []);
 
   const ask = useCallback(async (audio: Blob, scriptedQueryId: string | null) => {
-    const { run: r, plan: p, state: s, pointed: sel, frameSource: src } = live.current;
+    const { run: r, plan: p, state: s, pointed: sel, frameSource: src, buildMode: building } = live.current;
     const camera = cameraRef.current;
     if (!r || !p || !s || !camera) return;
     setStatus({ kind: "thinking", text: "Thinking…" });
@@ -85,7 +103,7 @@ export function SimPage() {
       });
       const context = buildContextPacket({
         assemblyId: r.assembly_id, planRevision: p.revision, stateVersion: s.version, selected: sel, currentStepId: s.current_step_id,
-        parts, camera, width: FRAME_W, height: FRAME_H, scriptedQueryId,
+        parts, camera, width: FRAME_W, height: FRAME_H, scriptedQueryId, mode: building ? "build" : "overlay",
       });
       const frame = await grabFrame(src);
       const started = performance.now();
@@ -96,6 +114,12 @@ export function SimPage() {
       setStatus({ kind: "idle", text: `Answered in ${((performance.now() - started) / 1000).toFixed(1)} s. ${IDLE.text}` });
       if (response.action?.type === "mark_state") {
         for (const id of response.action.part_ids) await setPart(id, response.action.new_state, "voice");
+      }
+      if (response.action?.type === "start_scan") {
+        // The headset would scan the table now; the laptop has no depth camera, so it replays a recorded scan.
+        setBuildMode(true);
+        setStatus({ kind: "info", text: `Scanning: replaying the ${recording.replace(/_/g, " ")} recording…` });
+        await replayBuildScan(`scan_rec_${recording}`, "saved");
       }
       if (response.audio_url) {
         const url = await fetchAnswerAudio(response.audio_url);
@@ -118,14 +142,14 @@ export function SimPage() {
         e.preventDefault();
         if (e.repeat || spaceDown) return;
         spaceDown = true;
-        if (opening || recording.current) return;
+        if (opening || mic.current) return;
         opening = true;
         // The first use shows a permission prompt, so say what is happening while the mic opens.
         setStatus({ kind: "listening", text: "Opening the microphone… keep holding Space" });
         try {
           const rec = await startRecording();
           if (spaceDown) {
-            recording.current = rec;
+            mic.current = rec;
             setStatus({ kind: "listening", text: "Listening… release Space to ask" });
           } else {
             await rec.stop(); // released while the mic was opening: nothing was said
@@ -138,14 +162,15 @@ export function SimPage() {
       else if (key === "m") void setPart(live.current.pointed, "missing", "manual");
       else if (key === "1" || key === "2" || key === "3") void ask(silentWav(), `q${key}`);
       else if (key === "f") setFrameSource((f) => (f === "render" ? "webcam" : "render"));
+      else if (key === "k") setBuildMode((on) => !on);
     };
     const up = async (e: KeyboardEvent) => {
       if (e.key !== " ") return;
       e.preventDefault();
       spaceDown = false;
-      if (!recording.current) return;
-      const rec = recording.current;
-      recording.current = null;
+      if (!mic.current) return;
+      const rec = mic.current;
+      mic.current = null;
       void ask(await rec.stop(), null);
     };
     window.addEventListener("keydown", down);
@@ -179,6 +204,16 @@ export function SimPage() {
         <div className="preview-hud-bar"><div style={{ width: `${state.progress.pct}%` }} /></div>
         <p className="preview-hud-step">{step ? `Step ${step.index} · ${step.title}` : "Complete"}</p>
         <p className="preview-hud-muted">Pointing at: <span className="sim-pointing">{pointedName ?? "nothing"}</span></p>
+        {buildMode && (
+          <div className="sim-kit">
+            <p className="preview-hud-title">Build mode · every turn is Kit's</p>
+            {kit.wish && <p className="preview-hud-muted">Asked for: {kit.wish}</p>}
+            <p className="preview-hud-muted">
+              {kit.designs.length ? `On show, left to right: ${kit.designs.map((d, i) => `${i + 1}. ${d}`).join(" · ")}` : "No designs yet: ask “what can I build?”"}
+            </p>
+            {kit.note && <p className="preview-hud-muted">{kit.note}</p>}
+          </div>
+        )}
       </aside>
       <aside className="sim-keys">
         <p><kbd>mouse</kbd>point (controller ray)</p>
@@ -186,6 +221,7 @@ export function SimPage() {
         <p><kbd>Space</kbd>hold to ask (laptop mic)</p>
         <p><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>scripted questions</p>
         <p><kbd>F</kbd>camera: {frameSource === "webcam" ? "webcam" : "hologram view"}</p>
+        <p><kbd>K</kbd>build mode: {buildMode ? "on (Kit)" : "off"}</p>
       </aside>
       {answer && (
         <section className="sim-answer" aria-live="polite">

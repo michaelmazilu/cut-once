@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Vec3 } from "@cutonce/schemas";
-import type { KitBuildContext } from "../src/build/session.js";
+import { pickIdea, type KitBuildContext } from "../src/build/session.js";
 import { decideKit, kitContextText, pickByPosition, whereFrom, type KitTurn } from "../src/copilot/kit.js";
 import { twin } from "./build-synth.js";
 
@@ -8,7 +8,7 @@ const turn = (over: Partial<KitTurn> = {}): KitTurn => ({ heard: "something", in
 const ideas = [{ idea_id: "idea_a", title: "Birdhouse" }, { idea_id: "idea_b", title: "Robot" }, { idea_id: "idea_c", title: "Can tower" }];
 const at = (over: object = {}) => ({
   canRethink: true, building: false, ideas,
-  byName: (said: string) => ideas.find((i) => said.toLowerCase().includes(i.title.toLowerCase())) ?? null, ...over,
+  byName: (said: string) => pickIdea(said, ideas), ...over,
 });
 
 describe("decideKit", () => {
@@ -19,15 +19,15 @@ describe("decideKit", () => {
   });
 
   it("rethinks the objects already on the table for a wish, and scans for a plain ask or when nothing is known yet", () => {
-    expect(decideKit(turn({ intent: "ideas", wish: "a birdhouse", answer: "" }), at())).toEqual({ kind: "rethink", wish: "a birdhouse", text: "Let me see how to make a birdhouse from what's here." });
-    expect(decideKit(turn({ intent: "ideas", wish: null, answer: "" }), at())).toEqual({ kind: "scan", wish: null, text: "Let me see what you've got." });
-    expect(decideKit(turn({ intent: "ideas", wish: "a birdhouse", answer: "On it!" }), at({ canRethink: false }))).toEqual({ kind: "scan", wish: "a birdhouse", text: "On it!" });
+    expect(decideKit(turn({ intent: "ideas", wish: "a birdhouse", answer: "" }), at())).toEqual({ kind: "rethink", wish: "a birdhouse", text: "Let me see how to make a birdhouse from what's here.", change: false });
+    expect(decideKit(turn({ intent: "ideas", wish: null, answer: "" }), at())).toEqual({ kind: "scan", wish: null, text: "Let me see what you've got.", change: false });
+    expect(decideKit(turn({ intent: "ideas", wish: "a birdhouse", answer: "On it!" }), at({ canRethink: false }))).toEqual({ kind: "scan", wish: "a birdhouse", text: "On it!", change: false });
   });
 
   it("mid-build, a change looks again with the change as the wish (the objects have moved)", () => {
     expect(decideKit(turn({ intent: "change", wish: "something crazier", answer: "" }), at({ canRethink: false, building: true })))
-      .toEqual({ kind: "scan", wish: "something crazier", text: "Let me look again with that in mind." });
-    expect(decideKit(turn({ intent: "change", wish: null, heard: "make it taller" }), at())).toMatchObject({ kind: "rethink", wish: "make it taller" });
+      .toEqual({ kind: "scan", wish: "something crazier", text: "Let me look again with that in mind.", change: true });
+    expect(decideKit(turn({ intent: "change", wish: null, heard: "make it taller" }), at())).toMatchObject({ kind: "rethink", wish: "make it taller", change: true });
   });
 
   it("picks a design by the model's id, by its name, or by where it stands", () => {
@@ -35,6 +35,11 @@ describe("decideKit", () => {
     expect(decideKit(turn({ intent: "pick", pick: "idea_zzz", heard: "the can tower please" }), at())).toMatchObject({ kind: "start", ideaId: "idea_c" });
     expect(decideKit(turn({ intent: "pick", pick: null, heard: "the one on the left" }), at())).toMatchObject({ kind: "start", ideaId: "idea_a" });
     expect(decideKit(turn({ intent: "pick", pick: null, heard: "that one" }), at())).toMatchObject({ kind: "say", clarify: true });
+  });
+
+  it("takes the model's pick by title as well as by id, before any position word", () => {
+    expect(decideKit(turn({ intent: "pick", pick: "Birdhouse", heard: "That's right, the birdhouse" }), at())).toMatchObject({ kind: "start", ideaId: "idea_a" });
+    expect(decideKit(turn({ intent: "pick", pick: "the robot", heard: "yeah the robot, right?" }), at())).toMatchObject({ kind: "start", ideaId: "idea_b" });
   });
 
   it("never picks while a build is under way", () =>
@@ -53,7 +58,30 @@ describe("decideKit", () => {
 
   it("asks back when it cannot tell, or is unsure of an action", () => {
     expect(decideKit(turn({ intent: "unclear", answer: "Do you want a design, or to know about this step?" }), at())).toEqual({ kind: "say", text: "Do you want a design, or to know about this step?", clarify: true });
-    expect(decideKit(turn({ intent: "ideas", confidence: 0.4, answer: "" }), at())).toEqual({ kind: "say", text: "Sorry, what would you like to do?", clarify: true });
+    expect(decideKit(turn({ intent: "unclear", answer: "" }), at())).toEqual({ kind: "say", text: "Sorry, what would you like to do?", clarify: true });
+    expect(decideKit(turn({ intent: "ideas", confidence: 0.4, answer: "" }), at())).toEqual({ kind: "say", text: "Do you want designs? Say what you'd like to build.", clarify: true });
+  });
+
+  // The model's answer to an action says the action ("Good choice.", "Marked it done."): spoken with no action, it
+  // tells the builder something happened that did not. Code asks for what it needs instead.
+  it("never speaks the model's words for an action it does not take", () => {
+    const claims = { answer: "Good choice, building it now." };
+    expect(decideKit(turn({ intent: "pick", heard: "I'll take the left one", ...claims }), at({ ideas: [] })))
+      .toEqual({ kind: "say", text: "There's nothing on show to pick yet. Ask me what you can build.", clarify: true });
+    expect(decideKit(turn({ intent: "pick", pick: null, heard: "that one", ...claims }), at()))
+      .toEqual({ kind: "say", text: "Which one? Say its name, or the left, middle or right one.", clarify: true });
+    expect(decideKit(turn({ intent: "pick", pick: "idea_c", confidence: 0.5, ...claims }), at()))
+      .toEqual({ kind: "say", text: "Do you want the can tower? Say its name to start it.", clarify: true });
+    const asks: [KitTurn["intent"], string][] = [
+      ["ideas", "Do you want designs? Say what you'd like to build."],
+      ["change", "Do you want different designs? Say what to change."],
+      ["done", "Is this step finished? Say done when it is."],
+      ["undo", "Do you want to undo the last change? Say undo."],
+      ["next", "Do you want the next step? Say next."],
+      ["back", "Do you want the step before? Say back."],
+    ];
+    for (const [intent, text] of asks) expect(decideKit(turn({ intent, confidence: 0.4, ...claims }), at())).toEqual({ kind: "say", text, clarify: true });
+    expect(decideKit(turn({ intent: "done", heard: "is it done?", ...claims }), at())).toEqual({ kind: "say", text: "Is this step finished? Say done when it is.", clarify: true });
   });
 });
 
@@ -65,6 +93,11 @@ describe("pickByPosition", () => {
   it("has no middle of two, and nothing to pick from none", () => {
     expect(pickByPosition("the middle one", ideas.slice(0, 2))).toBeNull();
     expect(pickByPosition("the left one", [])).toBeNull();
+  });
+  it("reads a position only where it says which design: 'that's right' and 'I left it' are not positions", () => {
+    expect(["that's right, the birdhouse", "yeah the robot, right?", "right, let's go", "I left it there"].map((s) => pickByPosition(s, ideas))).toEqual([null, null, null, null]);
+    expect(pickByPosition("the one on the right", ideas)?.idea_id).toBe("idea_c");
+    expect(pickByPosition("not the left one, the right one", ideas)).toBeNull();   // two positions: ask which
   });
 });
 

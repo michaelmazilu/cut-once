@@ -30,9 +30,14 @@ export interface Session {
   started: string | null;
   /** What the builder asked for ("a birdhouse"), for every design asked for in this session until a new wish or a plain ask. */
   wish: string | null;
-  /** Titles already offered in this session, so "something crazier" brings new ones. A plain ask starts afresh. */
+  /** The newest change to the designs on show ("something crazier"), on top of the wish, until the next ask. */
+  change: string | null;
+  /** Titles already offered in this session, so "something crazier" brings new ones. A new or plain ask starts afresh. */
   offered: string[];
 }
+
+/** All the builder asked for, as the designer, Kit and the Director are told it: "a birdhouse, then something crazier". */
+export const askedFor = (s: Pick<Session, "wish" | "change">): string | null => (s.wish && s.change ? `${s.wish}, then ${s.change}` : s.change ?? s.wish);
 
 /** What Kit is told about build mode on every turn: what is happening, the objects, the designs on show, the wish. */
 export interface KitBuildContext {
@@ -79,14 +84,15 @@ export function pickIdea<T extends { title: string }>(transcript: string, ideas:
 
 /**
  * One build session at a time (one headset). A scan is saved, answered at once (202), then processed in order:
- * outlines → names → sizes → rule ideas → AI ideas. Every step is broadcast, so the headset and /director update live.
+ * outlines → names → sizes → designs (live, then the rehearsal cache, then the rules). Every step is broadcast, so the
+ * headset and /director update live.
  */
 export class BuildSessions {
   readonly files: BuildFiles;
   private session: Session | null = null;
   private queue: Promise<void> = Promise.resolve();
   /** A wish the copilot sent with a scan it asked the headset for, until that scan arrives. */
-  private expected: { wish: string | null; at: number } | null = null;
+  private expected: { wish: string | null; change: boolean; at: number } | null = null;
   /** What the queue is doing right now: reading a scan, naming its objects, or designing. */
   private busy: "reading" | "naming" | "designing" | null = null;
   /** Work that outlives its queue step: a late live design answer refreshing the cache. */
@@ -105,14 +111,14 @@ export class BuildSessions {
   kitContext(): KitBuildContext {
     const s = this.session;
     const status = this.busy === "reading" || this.busy === "naming" ? "scanning: finding and naming the objects"
-      : this.busy === "designing" ? `designing${s?.wish ? ` ${s.wish}` : ""}`
+      : this.busy === "designing" ? `designing${s && askedFor(s) ? ` ${askedFor(s)}` : ""}`
       : !s || s.scans.length === 0 ? "nothing scanned yet"
       : s.started ? "a design is being built"
       : s.ideas.length ? `showing ${s.ideas.length} design${s.ideas.length === 1 ? "" : "s"}` : "no designs on show";
     return {
       status, twins: s?.twins ?? [], surfaces: s?.surfaces ?? [],
       camera: s?.camera && s.forward ? { position: s.camera, forward: s.forward } : null,
-      wish: s?.wish ?? null,
+      wish: s ? askedFor(s) : null,
       ideas: s && !s.started ? s.ideas.map((i) => ({ idea_id: i.idea_id, title: i.title, why: i.why, uses: [...new Set(Object.values(i.twin_of))], steps: i.plan.steps.length - 1 })) : [],
       started: s?.started ?? null,
       tape: hasTape(s?.twins ?? []),
@@ -122,7 +128,7 @@ export class BuildSessions {
   newSession(): Session {
     this.session = {
       session_id: newId("bsess"), created_at: new Date().toISOString(), scans: [], surfaces: [], twins: [], ideas: [],
-      camera: null, forward: null, photo: null, started: null, wish: null, offered: [],
+      camera: null, forward: null, photo: null, started: null, wish: null, change: null, offered: [],
     };
     return this.session;
   }
@@ -130,9 +136,7 @@ export class BuildSessions {
   accept(upload: BuildScanUpload): { scan_id: string; session_id: string } {
     const session = upload.session_id && this.session?.session_id === upload.session_id ? this.session : this.newSession();
     session.started = null;                                          // scanning again puts the headset back to picking
-    const said = this.expected;
-    this.expected = null;
-    if (said && Date.now() - said.at <= WISH_TTL_MS) this.setWish(session, said.wish);
+    this.takeWish(session);
     const scan = this.files.saveScan(upload, session.session_id);
     const photo = Buffer.from(upload.photo_b64, "base64");
     this.enqueue(() => this.process(session, scan, photo, "live"));
@@ -142,33 +146,53 @@ export class BuildSessions {
   replay(scanId: string, labels: "saved" | "live"): { session_id: string } {
     const { scan, photo } = this.files.readScan(scanId);
     const session = this.newSession();
+    this.takeWish(session);                                          // the Director's fallback for a failed scan: same wish
     this.enqueue(() => this.process(session, { ...scan, session_id: session.session_id }, photo, labels));
     return { session_id: session.session_id };
   }
 
-  canRethink = (): boolean => Boolean(this.session && this.session.twins.length > 0 && !this.session.started);
+  /** The wish waiting for a scan goes with this one (the headset's, or a replay), if it is still fresh. */
+  private takeWish(session: Session): void {
+    const said = this.expected;
+    this.expected = null;
+    if (said && Date.now() - said.at <= WISH_TTL_MS) this.setWish(session, said.wish, said.change);
+  }
+
+  /** Objects known, nothing being built, and no scan being read or named (it designs next: a rethink would design twice). */
+  canRethink = (): boolean => Boolean(this.session && this.session.twins.length > 0 && !this.session.started && this.busy !== "reading" && this.busy !== "naming");
 
   /**
-   * The copilot asked the headset for a scan, and the builder said what they want (null: a plain "what can I build?").
-   * The wish goes with the next scan to arrive, or straight to the scan being read or named now: its designs have
-   * not been asked for yet.
+   * The copilot is asking the headset for a scan, and the builder said what they want (null: a plain "what can I
+   * build?"). The wish goes with the next scan to arrive; or, when a scan is being read or named now (its designs not
+   * yet asked for), straight to that scan. Then it answers true: no other scan is needed.
    */
-  expectScan(wish: string | null): void {
-    this.expected = { wish: cleanWish(wish), at: Date.now() };
-    if (this.session && (this.busy === "reading" || this.busy === "naming")) this.setWish(this.session, this.expected.wish);
+  expectScan(wish: string | null, change: boolean): boolean {
+    if (this.session && (this.busy === "reading" || this.busy === "naming")) {
+      this.setWish(this.session, cleanWish(wish), change);
+      this.expected = null;
+      return true;
+    }
+    this.expected = { wish: cleanWish(wish), change, at: Date.now() };
+    return false;
   }
 
-  private setWish(session: Session, wish: string | null): void {
-    session.wish = wish;
-    if (wish === null) session.offered = [];                          // a plain ask: anything may be offered again
+  /**
+   * A change ("something crazier") goes on top of the wish, and keeps what was offered out of the next designs. A new
+   * ask, or a plain one, starts afresh: "build me a birdhouse" after "what can I build?" may well be answered by the
+   * birdhouse already shown.
+   */
+  private setWish(session: Session, wish: string | null, change: boolean): void {
+    if (change) { if (wish) session.change = wish; return; }
+    session.wish = wish; session.change = null; session.offered = [];
   }
 
-  rethink(request: string): Promise<boolean> {
+  rethink(request: string, change: boolean): Promise<boolean> {
     const s = this.session;
     if (!s || !this.canRethink()) return Promise.resolve(false);
-    s.wish = cleanWish(request) ?? s.wish;
+    const text = cleanWish(request);
+    if (text) this.setWish(s, text, change);
     const photo = s.photo && existsSync(s.photo) ? readFileSync(s.photo) : null;
-    this.enqueue(() => { this.broadcastInventory(s, s.twins, null, true, s.wish ? `Designing ${s.wish}…` : "Thinking again…"); return this.ideas(s, photo); });
+    this.enqueue(() => { const asked = askedFor(s); this.broadcastInventory(s, s.twins, null, true, asked ? `Designing ${asked}…` : "Thinking again…"); return this.ideas(s, photo); });
     return Promise.resolve(true);
   }
 
@@ -274,7 +298,8 @@ export class BuildSessions {
   /** "I see three tall cans and a pizza box. Designing a birdhouse…": what the HUD says once the objects have names. */
   private seeing(session: Session): string | null {
     const found = describeFound(session.twins);
-    return found ? `I see ${found}. ${session.wish ? `Designing ${session.wish}…` : "Working out what they could become…"}` : null;
+    const asked = askedFor(session);
+    return found ? `I see ${found}. ${asked ? `Designing ${asked}…` : "Working out what they could become…"}` : null;
   }
 
   private track(work: Promise<unknown>): void {
@@ -288,7 +313,9 @@ export class BuildSessions {
         cacheDir: join(this.files.root, "idea-cache"), timeoutMs: 20_000, liveMs: this.ctx.cfg.buildLiveMs, log: this.deps.log,
         background: (work) => this.track(work),
         note: (text) => this.broadcastInventory(session, session.twins, null, true, text) },
-      { sessionId: session.session_id, twins: session.twins, surfaces: session.surfaces, camera: session.camera ?? [0, 1.6, 0], photo, request: session.wish, offered: session.offered },
+      { sessionId: session.session_id, twins: session.twins, surfaces: session.surfaces, camera: session.camera ?? [0, 1.6, 0], photo, request: askedFor(session),
+        // The newest change may name a design shown before ("make the laptop riser taller"): that one may come back.
+        offered: session.offered.filter((title) => !(session.change && normalise(session.change).includes(normalise(title)))) },
       (ideas, final) => {
         if (this.replaced(session)) return;
         session.ideas = ideas;

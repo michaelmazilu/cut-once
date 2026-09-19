@@ -1,0 +1,7 @@
+{
+  "name": "CutOnce.Vision.Editor",
+  "rootNamespace": "CutOnce.Vision.Editor",
+  "references": ["CutOnce.Vision", "meta.xr.mrutilitykit", "Oculus.VR", "Unity.InferenceEngine"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

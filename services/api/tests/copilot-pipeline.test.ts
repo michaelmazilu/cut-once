@@ -351,25 +351,26 @@ describe("the wish, from the first ask", () => {
     const body = (await query()).json();
     expect(body.action).toEqual({ type: "start_scan" });
     expect(body.answer_text).toBe("Let me see how to make a birdhouse from what's here.");
-    expect(expect_).toHaveBeenCalledWith("a birdhouse");
+    expect(expect_).toHaveBeenCalledWith("a birdhouse", false);
     expect([routeTurn.mock.calls.length, ask.mock.calls.length]).toEqual([0, 0]);
   });
   it("a plain 'what can I build?' clears the wish, and 'scan again' leaves it alone", async () => {
     const expect_ = vi.spyOn(t.app.ctx.hooks.build!, "expectScan");
     transcribe.mockResolvedValue("what can I build");
     await query();
-    expect(expect_).toHaveBeenLastCalledWith(null);
+    expect(expect_).toHaveBeenLastCalledWith(null, false);
     expect_.mockClear();
     transcribe.mockResolvedValue("scan again");
     await query();
     expect(expect_).not.toHaveBeenCalled();
   });
-  it("the router's 'build ideas' carries its wish", async () => {
+  it("the router's 'build ideas' carries its wish, a new ask, and says what it will look for", async () => {
     transcribe.mockResolvedValue("could you come up with something to hold my phone");
-    routeTurn.mockResolvedValue({ flow: "build_ideas", confidence: 0.9, wish: "something to hold my phone" });
+    routeTurn.mockResolvedValue({ flow: "build_ideas", confidence: 0.9, wish: "something to hold my phone." });
     const expect_ = vi.spyOn(t.app.ctx.hooks.build!, "expectScan");
-    expect((await query()).json().action).toEqual({ type: "start_scan" });
-    expect(expect_).toHaveBeenCalledWith("something to hold my phone");
+    const body = (await query()).json();
+    expect([body.action, body.answer_text]).toEqual([{ type: "start_scan" }, "Let me see how to make something to hold my phone from what's here."]);
+    expect(expect_).toHaveBeenCalledWith("something to hold my phone", false);
   });
 });
 
@@ -422,9 +423,13 @@ describe("build mode: Kit's turn", () => {
     status: "showing 3 designs", surfaces: [], camera: null, wish: null, started: null, tape: false, ideas,
     twins: [twin({ twin_id: "o1", name: "tall_can", label: "tall can" }), twin({ twin_id: "o2", name: "pizza_box", label: "pizza box" })], ...over,
   });
-  const kitHears = (over: Partial<KitTurn> = {}) => runKitTurn.mockResolvedValue({
-    kit: { heard: "something", intent: "question", wish: null, pick: null, answer: "It holds weight.", objects: [], confidence: 0.9, ...over }, sttMs: 12, modelMs: 34,
-  });
+  // These tests run on OpenAI (no OMNI key): the pipeline transcribes first, and what Kit heard is the transcript.
+  const kitHears = (over: Partial<KitTurn> = {}) => {
+    transcribe.mockResolvedValue(over.heard ?? "something");
+    return runKitTurn.mockResolvedValue({
+      kit: { heard: "something", intent: "question", wish: null, pick: null, answer: "It holds weight.", objects: [], confidence: 0.9, ...over }, sttMs: null, modelMs: 34,
+    });
+  };
   const build = () => t.app.ctx.hooks.build!;
   const onTable = (over: Partial<KitBuildContext> = {}) => vi.spyOn(build(), "kitContext").mockReturnValue(table(over));
 
@@ -434,10 +439,28 @@ describe("build mode: Kit's turn", () => {
     const body = (await query({ mode: "build" })).json();
     expect([body.answer_text, body.highlight_twins, body.action, body.needs_clarification]).toEqual(["Yes, the pizza box on your left can.", ["o2"], null, false]);
     expect(body.transcript).toBe("can the box hold my laptop");
-    expect(body.timings_ms).toMatchObject({ kit: 34, stt: 12, kit_openai: 1 });
-    expect([transcribe.mock.calls.length, routeTurn.mock.calls.length, ask.mock.calls.length]).toEqual([0, 0, 0]);
+    expect(body.timings_ms).toMatchObject({ kit: 34, stt: expect.any(Number), kit_openai: 1 });
+    expect([transcribe.mock.calls.length, routeTurn.mock.calls.length, ask.mock.calls.length]).toEqual([1, 0, 0]);
     const call = runKitTurn.mock.calls[0]![0];
-    expect([call.ai.provider, call.context.status, call.building, call.audio.length > 0]).toEqual(["openai", "showing 3 designs", null, true]);
+    expect([call.ai.provider, call.context.status, call.building, call.audio.length > 0, call.transcript]).toEqual(["openai", "showing 3 designs", null, true, "can the box hold my laptop"]);
+  });
+
+  it("on OpenAI, a voice command said outright is answered from the transcript: Kit's model is not called", async () => {
+    onTable();
+    transcribe.mockResolvedValue("Next step");
+    const body = (await query({ mode: "build" })).json();
+    expect([body.action, body.answer_text]).toEqual([{ type: "step_nav", direction: "next" }, "Next step."]);
+    expect(body.timings_ms).toMatchObject({ fast_path: 1, kit_openai: 1 });
+    expect(runKitTurn).not.toHaveBeenCalled();
+  });
+
+  it("on OpenAI, a transcription that fails or hears nothing is said out loud, with no Kit call", async () => {
+    onTable();
+    transcribe.mockRejectedValue(new Error("Request timed out."));
+    expect((await query({ mode: "build" })).json().answer_text).toBe("I couldn't hear that. Hold A and ask again.");
+    transcribe.mockResolvedValue("");
+    expect((await query({ mode: "build" })).json().answer_text).toBe("I didn't catch that. Hold A and ask again.");
+    expect(runKitTurn).not.toHaveBeenCalled();
   });
 
   it("a typed question needs no voice clip: Kit gets the words as what was said", async () => {
@@ -453,7 +476,7 @@ describe("build mode: Kit's turn", () => {
     });
     expect([res.statusCode, res.json().answer_text]).toEqual([200, "Yes, the pizza box can."]);
     const call = runKitTurn.mock.calls[0]![0];
-    expect([call.said, call.audio.length, transcribe.mock.calls.length]).toEqual(["will the box hold a mug", 0, 0]);
+    expect([call.transcript, call.audio.length, transcribe.mock.calls.length]).toEqual(["will the box hold a mug", 0, 0]);
   });
 
   it("a wish with nothing known yet starts a scan that carries it", async () => {
@@ -462,7 +485,7 @@ describe("build mode: Kit's turn", () => {
     kitHears({ heard: "I would love something birds could live in", intent: "ideas", wish: "a birdhouse", answer: "" });
     const body = (await query({ mode: "build" })).json();
     expect([body.action, body.answer_text]).toEqual([{ type: "start_scan" }, "Let me see how to make a birdhouse from what's here."]);
-    expect(expect_).toHaveBeenCalledWith("a birdhouse");
+    expect(expect_).toHaveBeenCalledWith("a birdhouse", false);
   });
 
   it("a wish with the objects already known rethinks them, with no new scan to wait for", async () => {
@@ -472,7 +495,28 @@ describe("build mode: Kit's turn", () => {
     kitHears({ heard: "what about a little house for birds", intent: "ideas", wish: "a birdhouse", answer: "Ooh, a birdhouse. Let me think." });
     const body = (await query({ mode: "build" })).json();
     expect([body.action, body.answer_text]).toEqual([null, "Ooh, a birdhouse. Let me think."]);
-    expect(rethink).toHaveBeenCalledWith("a birdhouse");
+    expect(rethink).toHaveBeenCalledWith("a birdhouse", false);
+  });
+
+  it("a wish said while a scan is being read goes with that scan: no second scan is asked for", async () => {
+    onTable({ status: "scanning: finding and naming the objects" });
+    vi.spyOn(build(), "canRethink").mockReturnValue(false);
+    const expect_ = vi.spyOn(build(), "expectScan").mockReturnValue(true);
+    kitHears({ heard: "I'd love a birdhouse", intent: "ideas", wish: "a birdhouse", answer: "" });
+    expect((await query({ mode: "build" })).json()).toMatchObject({ action: null, answer_text: "Let me see how to make a birdhouse from what's here." });
+    kitHears({ heard: "Build me a boat" });
+    expect((await query({ mode: "build" })).json()).toMatchObject({ action: null, answer_text: "Let me see how to make a boat from what's here." });
+    expect(expect_.mock.calls).toEqual([["a birdhouse", false], ["a boat", false]]);
+  });
+
+  it("'make me something crazier' said outright changes the designs on show: those shown are not offered again", async () => {
+    onTable();
+    vi.spyOn(build(), "canRethink").mockReturnValue(true);
+    const rethink = vi.spyOn(build(), "rethink").mockResolvedValue(true);
+    kitHears({ heard: "Make me something crazier", intent: "ideas", wish: "something crazier", answer: "" });
+    const body = (await query({ mode: "build" })).json();
+    expect([body.action, body.answer_text]).toEqual([null, "Let me see how to make something crazier from what's here."]);
+    expect(rethink).toHaveBeenCalledWith("something crazier", true);
   });
 
   it("mid-build, 'something crazier' looks at the table again with that wish (the pieces have moved)", async () => {
@@ -482,7 +526,7 @@ describe("build mode: Kit's turn", () => {
     kitHears({ heard: "now something crazier", intent: "change", wish: "something crazier", answer: "" });
     const body = (await query({ mode: "build" })).json();
     expect([body.action, body.answer_text]).toEqual([{ type: "start_scan" }, "Let me look again with that in mind."]);
-    expect(expect_).toHaveBeenCalledWith("something crazier");
+    expect(expect_).toHaveBeenCalledWith("something crazier", true);
   });
 
   it("picks a design on show by where it stands, as the trigger would", async () => {
@@ -491,6 +535,27 @@ describe("build mode: Kit's turn", () => {
     kitHears({ heard: "the one on the right", intent: "pick", pick: null });
     expect((await query({ mode: "build" })).json().answer_text).toBe("Building the can tower. Watch the pieces.");
     expect(start).toHaveBeenCalledWith("idea_c");
+  });
+
+  it("a design on show named outright is picked, even in the words of a wish ('let's build a birdhouse'), with no model call", async () => {
+    onTable();
+    const start = vi.spyOn(build(), "startIdea").mockResolvedValue({});
+    const rethink = vi.spyOn(build(), "rethink");
+    kitHears({ heard: "Let's build a birdhouse", intent: "ideas", wish: "a birdhouse" });
+    expect((await query({ mode: "build" })).json().answer_text).toBe("Building the birdhouse. Watch the pieces.");
+    expect([start.mock.calls, rethink.mock.calls.length, runKitTurn.mock.calls.length]).toEqual([[["idea_a"]], 0, 0]);
+  });
+
+  it("on OMNI too, a design on show named in the words of a wish is picked, not designed again", async () => {
+    const old = t;
+    t = await makeApp({ elevenKey: "", openaiKey: "", omniKey: "q", omniBaseUrl: "http://127.0.0.1:9/v1", copilotMode: "live" });
+    try {
+      onTable();
+      const start = vi.spyOn(build(), "startIdea").mockResolvedValue({});
+      runKitTurn.mockResolvedValue({ kit: { heard: "Build me a robot", intent: "ideas", wish: "a robot", pick: null, answer: "", objects: [], confidence: 0.9 }, sttMs: null, modelMs: 40 });
+      expect((await query({ mode: "build" })).json().answer_text).toBe("Building the robot. Watch the pieces.");
+      expect(start).toHaveBeenCalledWith("idea_b");
+    } finally { await t.cleanup(); t = old; }
   });
 
   it("a picked build that cannot be started is said out loud, not a failed turn", async () => {
@@ -507,13 +572,14 @@ describe("build mode: Kit's turn", () => {
     kitHears({ heard: "What can I build?", intent: "question", answer: "Lots of things!" });
     const body = (await query({ mode: "build" })).json();
     expect([body.action, body.answer_text]).toEqual([{ type: "start_scan" }, "Let me see what you've got."]);
-    expect(expect_).toHaveBeenCalledWith(null);
+    expect(expect_).toHaveBeenCalledWith(null, false);
   });
 
   it("'done' is the step command; with no build under way there is no step, and Kit says so", async () => {
     onTable();
-    kitHears({ heard: "I'm finished with that", intent: "done", answer: "", confidence: 0.95 });
+    kitHears({ heard: "I'm finished with that", intent: "done", answer: "Marked it done!", confidence: 0.95 });
     // Nothing is pointed at: the hologram is hidden while designs are chosen, so the headset sends no selection.
+    // The model's "Marked it done!" is never said: nothing was marked.
     const body = (await query({ mode: "build", selected_part_id: null, selection_source: "none" })).json();
     expect([body.action, body.answer_text, body.needs_clarification]).toEqual([null, "There's no step to do that to yet.", true]);
   });
@@ -530,6 +596,7 @@ describe("build mode: Kit's turn", () => {
     t = await makeApp({ elevenKey: "", openaiKey: "test-key", omniKey: "q", omniBaseUrl: "http://127.0.0.1:9/v1", copilotMode: "live" });
     try {
       onTable();
+      transcribe.mockResolvedValue("hi");                                        // heard alongside, and reused by the fallback
       runKitTurn.mockRejectedValueOnce(new Error("401 Unauthorized"))
         .mockResolvedValueOnce({ kit: { heard: "hi", intent: "question", wish: null, pick: null, answer: "Hello!", objects: [], confidence: 0.9 }, sttMs: 20, modelMs: 40 });
       const body = (await query({ mode: "build" })).json();
@@ -539,16 +606,83 @@ describe("build mode: Kit's turn", () => {
     } finally { await t.cleanup(); t = old; }
   });
 
-  it("says 'ask me again' when the model runs out of time and too little of the cap is left for a fallback", async () => {
+  const omniToo = (over: object = {}) => makeApp({ elevenKey: "", openaiKey: "test-key", omniKey: "q", omniBaseUrl: "http://127.0.0.1:9/v1", copilotMode: "live", ...over });
+  const answered = (answer: string) => ({ kit: { heard: "which piece goes first", intent: "question", wish: null, pick: null, answer, objects: [], confidence: 0.9 }, sttMs: null, modelMs: 30 });
+
+  it("on OMNI with OpenAI too, a command said outright answers from the transcript: a stalled OMNI call cannot hold 'next' up", async () => {
     const old = t;
-    t = await makeApp({ elevenKey: "", openaiKey: "test-key", copilotMode: "live", kitTurnMs: 200 });
+    t = await omniToo();
     try {
       onTable();
+      transcribe.mockResolvedValue("next");
+      runKitTurn.mockReturnValue(new Promise(() => {}));                      // OMNI never answers
+      const started = Date.now();
+      const body = (await query({ mode: "build" })).json();
+      expect([body.action, body.answer_text]).toEqual([{ type: "step_nav", direction: "next" }, "Next step."]);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(runKitTurn.mock.calls.map((c) => c[0].ai.provider)).toEqual(["omni"]);
+    } finally { await t.cleanup(); t = old; }
+  });
+
+  it("on OMNI, anything but a command waits for what OMNI heard; with no OpenAI key nothing is transcribed alongside", async () => {
+    const old = t;
+    t = await omniToo();
+    try {
+      onTable();
+      transcribe.mockResolvedValue("which piece goes first");
+      runKitTurn.mockResolvedValue(answered("The can goes first."));
+      expect((await query({ mode: "build" })).json()).toMatchObject({ answer_text: "The can goes first.", timings_ms: { kit_omni: 1 } });
+    } finally { await t.cleanup(); t = old; }
+    t = await omniToo({ openaiKey: "" });
+    try {
+      onTable();
+      transcribe.mockClear();
+      runKitTurn.mockResolvedValue(answered("The can goes first."));
+      expect((await query({ mode: "build" })).json().answer_text).toBe("The can goes first.");
+      expect(transcribe).not.toHaveBeenCalled();
+    } finally { await t.cleanup(); t = old; }
+  });
+
+  it("a stalled OMNI call with too little of the cap left says 'ask me again', and tries nothing else", async () => {
+    const old = t;
+    t = await omniToo({ kitTurnMs: 200 });                                    // this file's cap is 1.5 s: no room for a fallback
+    try {
+      onTable();
+      transcribe.mockResolvedValue("which piece goes first");
       runKitTurn.mockReturnValue(new Promise(() => {}));
       const started = Date.now();
       const body = (await query({ mode: "build" })).json();
       expect([body.answer_text, body.needs_clarification]).toEqual(["That took too long. Ask me again.", true]);
-      expect(Date.now() - started).toBeLessThan(3000);
+      expect(Date.now() - started).toBeLessThan(3000);                     // the model's 1 s floor, not a fallback's wait
+      expect(runKitTurn.mock.calls.map((c) => c[0].ai.provider)).toEqual(["omni"]);
+    } finally { await t.cleanup(); t = old; }
+  });
+
+  it("a stalled OMNI call with time left falls back to OpenAI once, reusing the transcript", async () => {
+    const old = t;
+    process.env.COPILOT_CAP_MS = "9000";
+    t = await omniToo({ kitTurnMs: 200 });
+    try {
+      onTable();
+      transcribe.mockResolvedValue("which piece goes first");
+      runKitTurn.mockReturnValueOnce(new Promise(() => {})).mockResolvedValueOnce(answered("The can goes first."));
+      const body = (await query({ mode: "build" })).json();
+      expect([body.answer_text, body.timings_ms.kit_openai]).toEqual(["The can goes first.", 1]);
+      expect(runKitTurn.mock.calls.map((c) => [c[0].ai.provider, c[0].transcript])).toEqual([["omni", undefined], ["openai", "which piece goes first"]]);
+      expect(transcribe).toHaveBeenCalledTimes(1);
+    } finally { await t.cleanup(); t = old; }
+  });
+
+  it("never gives Kit's model more than the hard cap has left, whatever KIT_TURN_MS says", async () => {
+    const old = t;
+    t = await omniToo({ openaiKey: "", kitTurnMs: 20_000 });                  // this file's cap is 1.5 s
+    try {
+      onTable();
+      runKitTurn.mockReturnValue(new Promise(() => {}));
+      const started = Date.now();
+      expect((await query({ mode: "build" })).json().answer_text).toBe("That took too long. Ask me again.");
+      expect(Date.now() - started).toBeLessThan(2500);
+      expect(runKitTurn.mock.calls[0]![0].timeoutMs).toBeLessThanOrEqual(1500);
     } finally { await t.cleanup(); t = old; }
   });
 

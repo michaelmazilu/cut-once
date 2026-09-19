@@ -20,8 +20,8 @@ import type { KitBuildContext } from "../build/session.js";
  *   (no flag)  every recording in data/build/recordings that has a truth.json: its saved names on THIS build's measurements
  *              (so a twin builder that got worse shows up). No key, no network.
  *   --live     name with the vision model and ask the design model too, on the providers KIT_AI picks (ai.ts).
- *   --router   the spoken-turn test set on every provider with a key: the router outside build mode, Kit's turn inside it;
- *              how often each is right, and right within its live budget.
+ *   --router   the spoken-turn test set: the router outside build mode (on OpenAI, as the app routes), and Kit's turn
+ *              inside it on every provider with a key; how often each is right, and right within its live budget.
  *   --check    exit 1 when a bar is missed: found 90%, labels 90%, size p90 2 cm, router 97%.
  */
 const args = new Set(process.argv.slice(2));
@@ -33,44 +33,51 @@ const q = (v: number[], p: number) => (v.length ? [...v].sort((a, b) => a - b)[M
 let bad = false;
 
 if (args.has("--router")) {
-  const set = JSON.parse(readFileSync(join(REPO_ROOT, "data", "build", "router-eval.json"), "utf8")) as { said: string; mode: string; ideas: string[]; expect: string }[];
-  const providers = (["omni", "openai"] as const).filter((p) => ready(cfg, p));
-  if (!providers.length) console.log("turns: skipped (neither OMNI_API_KEY + OMNI_BASE_URL nor OPENAI_API_KEY is set)");
+  type Case = { said: string; mode: string; ideas: string[]; expect: string };
+  const set = JSON.parse(readFileSync(join(REPO_ROOT, "data", "build", "router-eval.json"), "utf8")) as Case[];
   const real = models(cfg);
-  // Judgement first, with patient budgets; each answer's time is checked against the live budget beside it.
-  const patientCfg = { ...cfg, omniRouteMs: 5000 }, patientM = { ...real, budgets: { ...real.budgets, route: 5000 } };
-  for (const provider of providers) {
-    const ai = aiFor(cfg, "turn", provider)!;
+  /** Judgement first, with patient budgets; each answer's time is then held to the live budget: a late answer is `late`. */
+  const score = async (label: string, cases: Case[], budget: number, late: string, run: (c: Case) => Promise<string>) => {
     const ms: number[] = [];
     let right = 0, rightInTime = 0;
-    for (const c of set) {
+    for (const c of cases) {
       const t0 = Date.now();
-      let got: string, budget: number;
-      if (c.mode === "build") {
-        // Build mode: Kit's turn from the words (OpenAI's path), with the set's designs on show and no objects.
-        budget = cfg.kitTurnMs;
-        const context: KitBuildContext = {
-          status: c.ideas.length ? `showing ${c.ideas.length} designs` : "nothing scanned yet", twins: [], surfaces: [], camera: null, wish: null, started: null, tape: false,
-          ideas: c.ideas.map((title, k) => ({ idea_id: `idea_eval${k + 1}`, title, why: "", uses: [], steps: 3 })),
-        };
-        try {
-          const kit = KitTurn.parse(await ai.call(cfg, { name: "kit_turn", model: ai.model, schema: KitTurn, system: KIT_SYSTEM, text: kitContextText(context, null, c.said, []), timeoutMs: 20_000 }));
-          got = kit.intent === "ideas" ? "build_ideas" : kit.intent === "change" ? "modify_design" : kit.intent;
-        } catch (err) { got = `error: ${(err as Error).message.slice(0, 60)}`; }
-      } else {
-        // Outside build mode: the router, scored with the pipeline's own rule (only a sure "build ideas" scans).
-        budget = provider === "omni" ? cfg.omniRouteMs : real.budgets.route;
-        got = routeOutcome(await routeTurn(patientCfg, patientM, { transcript: c.said, mode: c.mode }, ai)) === "scan" ? "build_ideas" : "question";
-      }
+      const got = await run(c);
       const took = Date.now() - t0;
       ms.push(took);
-      if (got === c.expect) right++; else console.log(`  ✗ [${provider}] "${c.said}" (${c.mode}) → ${got}, expected ${c.expect}`);
-      // Live, a late answer is dropped: outside build mode the turn becomes a question, in build mode "ask me again".
-      const live = took <= budget ? got : c.mode === "build" ? "too slow" : "question";
-      if (live === c.expect) rightInTime++; else if (got === c.expect) console.log(`  ⏱ [${provider}] "${c.said}" was right, but took ${took} ms (budget ${budget} ms)`);
+      if (got === c.expect) right++; else console.log(`  ✗ [${label}] "${c.said}" (${c.mode}) → ${got}, expected ${c.expect}`);
+      if ((took <= budget ? got : late) === c.expect) rightInTime++;
+      else if (got === c.expect) console.log(`  ⏱ [${label}] "${c.said}" was right, but took ${took} ms (budget ${budget} ms)`);
     }
-    console.log(`turns on ${provider} (${ai.model}): ${right}/${set.length} = ${pct(right, set.length)} right; within budget: ${rightInTime}/${set.length} = ${pct(rightInTime, set.length)} (bar 97%); median ${q(ms, 0.5)} ms, p90 ${q(ms, 0.9)} ms`);
-    if (rightInTime / set.length < 0.97) bad = true;
+    console.log(`${label}: ${right}/${cases.length} = ${pct(right, cases.length)} right; within budget: ${rightInTime}/${cases.length} = ${pct(rightInTime, cases.length)} (bar 97%); median ${q(ms, 0.5)} ms, p90 ${q(ms, 0.9)} ms`);
+    if (cases.length && rightInTime / cases.length < 0.97) bad = true;
+  };
+
+  // Outside build mode: the router, on OpenAI as the app runs it, scored with the pipeline's own rule (only a sure
+  // "build ideas" scans; a late answer makes the turn a question).
+  const router = aiFor(cfg, "turn", "openai");
+  const patientM = { ...real, budgets: { ...real.budgets, route: 5000 } };
+  if (router?.provider === "openai") {
+    await score(`router on openai (${real.router})`, set.filter((c) => c.mode !== "build"), real.budgets.route, "question", async (c) =>
+      routeOutcome(await routeTurn(cfg, patientM, { transcript: c.said, mode: c.mode }, router)) === "scan" ? "build_ideas" : "question");
+  } else console.log("router: skipped (OPENAI_API_KEY is not set; outside build mode the app needs it anyway)");
+
+  // Build mode: Kit's turn from the words (OpenAI's path), with the set's designs on show and no objects, on every
+  // provider with a key. A late answer is "That took too long. Ask me again."
+  const providers = (["omni", "openai"] as const).filter((p) => ready(cfg, p));
+  if (!providers.length) console.log("Kit's turn: skipped (neither OMNI_API_KEY + OMNI_BASE_URL nor OPENAI_API_KEY is set)");
+  for (const provider of providers) {
+    const ai = aiFor(cfg, "turn", provider)!;
+    await score(`Kit's turn on ${provider} (${ai.model})`, set.filter((c) => c.mode === "build"), cfg.kitTurnMs, "too slow", async (c) => {
+      const context: KitBuildContext = {
+        status: c.ideas.length ? `showing ${c.ideas.length} designs` : "nothing scanned yet", twins: [], surfaces: [], camera: null, wish: null, started: null, tape: false,
+        ideas: c.ideas.map((title, k) => ({ idea_id: `idea_eval${k + 1}`, title, why: "", uses: [], steps: 3 })),
+      };
+      try {
+        const kit = KitTurn.parse(await ai.call(cfg, { name: "kit_turn", model: ai.model, schema: KitTurn, system: KIT_SYSTEM, text: kitContextText(context, null, c.said, []), timeoutMs: 20_000 }));
+        return kit.intent === "ideas" ? "build_ideas" : kit.intent === "change" ? "modify_design" : kit.intent;
+      } catch (err) { return `error: ${(err as Error).message.slice(0, 60)}`; }
+    });
   }
 }
 

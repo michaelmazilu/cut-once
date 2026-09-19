@@ -18,8 +18,10 @@ import { solve } from "./solver.js";
 import { checkStability } from "./stability.js";
 
 export interface IdeasDeps {
+  cfg: Config; vocab: Vocab; rules: Rule[];
   /** The designing job's model call, or null when no provider has a key (then: the cache, then the rules). */
-  cfg: Config; vocab: Vocab; rules: Rule[]; call: ModelCall | null; model: string; cacheDir: string; timeoutMs: number;
+  call: ModelCall | null;
+  model: string; cacheDir: string; timeoutMs: number;
   /** How long the live answer is waited for before the rehearsal cache is shown (BUILD_LIVE_MS). */
   liveMs: number;
   log: { warn: (o: object, m: string) => void };
@@ -30,9 +32,9 @@ export interface IdeasDeps {
 }
 export interface IdeasInput {
   sessionId: string; twins: Twin[]; surfaces: Surface[]; camera: Vec3; photo: Buffer | null;
-  /** What the builder asked for ("a birdhouse"), or null. */
+  /** What the builder asked for ("a birdhouse", or "a birdhouse, then something crazier"), or null. */
   request: string | null;
-  /** Titles already offered in this session: not offered again unless the request names them. */
+  /** Titles already offered in this session that must not be offered again (the session decides which count). */
   offered?: string[];
 }
 type Made = NonNullable<BuildIdea["made"]>;
@@ -66,7 +68,7 @@ export function inventoryText(twins: Twin[], surfaces: Surface[]): string {
 }
 
 /** Is there tape on the table (a roll, or anything Kit named as tape)? Then designs may tape pieces together. */
-export const hasTape = (twins: Twin[]) => twins.some((t) => t.name === "tape_roll" || /\btape\b/.test(normalise(t.label)));
+export const hasTape = (twins: Twin[]) => twins.some((t) => t.name === "tape_roll" || (/\btape\b/.test(normalise(t.label)) && !/\b(tape measure|measuring tape)\b/.test(normalise(t.label))));
 
 /** An object's identity in a cache key: a vocabulary name, or the model's own name for anything else. */
 const kindOf = (t: Twin) => (t.name === "other" ? `other:${normalise(t.label)}` : t.name);
@@ -74,13 +76,14 @@ const kindOf = (t: Twin) => (t.name === "other" ? `other:${normalise(t.label)}` 
 /**
  * The cache key and the canonical ids (c1… in kind-then-size order) that map cached designs onto a new scan of the
  * same things. Sizes to the centimetre for objects with a standard size, to 5 cm for measured ones: two scans of one
- * box differ by a centimetre or two, and a cached design is checked again against today's sizes anyway. The wish,
- * the model and the prompt's version are in the key too: a birdhouse is not the answer to "something crazier".
+ * box differ by a centimetre or two, and a cached design is checked again against today's sizes anyway. The wish and
+ * the prompt's version are in the key too: a birdhouse is not the answer to "something crazier". Not the model: a
+ * design that stands is checked again whoever made it, and a rehearsal on one provider must serve the other, or none.
  */
-export function canonical(twins: Twin[], wish: string | null = null, model = "") {
+export function canonical(twins: Twin[], wish: string | null = null) {
   const sorted = [...twins].sort((a, b) => kindOf(a).localeCompare(kindOf(b)) || volumeOf(a.shape) - volumeOf(b.shape) || a.twin_id.localeCompare(b.twin_id));
   const size = (t: Twin) => dimsCm(t.shape).map((v) => (t.snapped ? Math.round(v) : 5 * Math.round(v / 5)));
-  const key = createHash("sha1").update(JSON.stringify([PROMPT_VERSION, model, sorted.map((t) => [kindOf(t), size(t)]), wish ? normalise(wish) : ""])).digest("hex").slice(0, 16);
+  const key = createHash("sha1").update(JSON.stringify([PROMPT_VERSION, sorted.map((t) => [kindOf(t), size(t)]), wish ? normalise(wish) : ""])).digest("hex").slice(0, 16);
   return { key, toCanon: new Map(sorted.map((t, i) => [t.twin_id, `c${i + 1}`])), fromCanon: new Map(sorted.map((t, i) => [`c${i + 1}`, t.twin_id])) };
 }
 
@@ -142,18 +145,18 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * the designs saved earlier (at rehearsal) for the same objects and wish are shown instead, and the live answer only
  * refreshes the cache when it lands: a preview never changes under the judge's pointer. With nothing cached, Kit
  * keeps waiting for the live answer. The stored rules come last: with no model at all, or when nothing else stands.
- * Designs already offered in this session are not offered again, unless the request names one. One final list.
+ * Designs already offered (input.offered) are not offered again, unless nothing else stands. One final list.
  */
 export async function computeIdeas(deps: IdeasDeps, input: IdeasInput, emit: (ideas: BuildIdea[], final: boolean) => void): Promise<BuildIdea[]> {
   const usable = input.twins.filter((t) => t.name !== "unknown" && t.confidence >= 0.5);
   const byId = new Map(usable.map((t) => [t.twin_id, t]));
   const surface = buildSurface(usable, input.surfaces);
   if (!surface || usable.length === 0) { emit([], true); return []; }
-  const canon = canonical(usable, input.request, deps.model);
+  const canon = canonical(usable, input.request);
   const offered = new Set((input.offered ?? []).map((t) => t.toLowerCase()));
-  const asked = input.request ? normalise(input.request) : "";
-  const fresh = (list: BuildIdea[]) => list.filter((i) => !offered.has(i.title.toLowerCase()) || (asked !== "" && asked.includes(normalise(i.title))));
-  const fromCache = () => cachedIdeas(deps, input, byId, surface, canon);
+  const fresh = (list: BuildIdea[]) => list.filter((i) => !offered.has(i.title.toLowerCase()));
+  let cache: BuildIdea[] | null = null;                                // read and checked once, whoever asks first
+  const fromCache = () => (cache ??= cachedIdeas(deps, input, byId, surface, canon));
   const fromRules = () => matchRules(deps.rules, usable)
     .map((m) => check({ draft: m.draft, source: "rule", made: "rule", ruleId: m.rule.rule_id, payload: m.payload }, byId, surface, input, deps))
     .flatMap((r) => ("idea" in r ? [r.idea] : []));
@@ -165,7 +168,8 @@ export async function computeIdeas(deps: IdeasDeps, input: IdeasInput, emit: (id
     const live = invent(deps, input, usable, byId, surface, canon);
     const settled = live.then((r) => ({ r }), (e: Error) => ({ e }));
     const early = await Promise.race([settled, sleep(deps.liveMs)]);
-    const cached = early === null ? fromCache() : [];
+    // Only new designs from the cache end the wait: repeats of what was just shown are worth less than the live answer.
+    const cached = early === null ? fresh(fromCache()) : [];
     if (early === null && cached.length) {
       first = cached;
       deps.background?.(settled.then((s) => { if ("e" in s) deps.log.warn({ err: s.e.message }, "a late live design answer failed"); }));

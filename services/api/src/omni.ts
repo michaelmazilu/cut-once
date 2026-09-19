@@ -6,13 +6,27 @@ import { schemaFor, type JsonCall } from "./llm.js";
 /** When a call answered: time to the first streamed text, the whole call, and how many tries it took. */
 export interface OmniTiming { firstTokenMs: number | null; totalMs: number; attempts: number }
 
-/** The JSON object in a model's text reply. Fences and prose around it are dropped. */
-export function extractJson(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
-  const t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const start = t.indexOf("{"), end = t.lastIndexOf("}");
-  if (start < 0 || end <= start) return { ok: false, error: "no JSON object in the reply" };
-  try { return { ok: true, value: JSON.parse(t.slice(start, end + 1)) }; }
-  catch (err) { return { ok: false, error: `the JSON does not parse (${(err as Error).message})` }; }
+/**
+ * The JSON objects in a model's text reply, last first: the answer usually comes after any thinking or example. Each
+ * is a balanced {…} that parses (braces inside strings do not count); fences, prose and anything else are skipped.
+ */
+export function jsonObjects(text: string): unknown[] {
+  const found: unknown[] = [];
+  for (let start = text.indexOf("{"); start >= 0; start = text.indexOf("{", start + 1)) {
+    let depth = 0, inString = false, escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) { if (escaped) escaped = false; else if (ch === "\\") escaped = true; else if (ch === "\"") inString = false; continue; }
+      if (ch === "\"") inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) {
+        // An object that parses is kept, and the search goes on after it; one that does not, from its next brace.
+        try { found.push(JSON.parse(text.slice(start, i + 1))); start = i; } catch { /* not JSON: prose in braces */ }
+        break;
+      }
+    }
+  }
+  return found.reverse();
 }
 
 const issues = (err: z.ZodError) => err.issues.slice(0, 5).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
@@ -56,12 +70,17 @@ export async function omniJsonCall<S extends ZodTypeAny>(cfg: Config, call: Json
         if (firstToken === null) firstToken = Date.now() - t0;
         text += delta;
       }
+    } catch (err) {
+      if (!abort.signal.aborted) throw err;
     } finally { clearTimeout(timer); }
-    const parsed = extractJson(text);
-    const checked = parsed.ok ? call.schema.safeParse(parsed.value) : null;
-    if (checked?.success) { timing?.({ firstTokenMs: firstToken, totalMs: Date.now() - t0, attempts: attempt }); return checked.data; }
-    why = checked ? issues(checked.error) : parsed.ok ? "invalid" : parsed.error;
+    // The deadline ends a stream quietly: say so, not that half a reply was not JSON.
+    if (abort.signal.aborted) { why = "out of time"; break; }
+    // The first object, from the last back, that matches the schema: a thinking model may write others before it.
+    const checks = jsonObjects(text).map((value) => call.schema.safeParse(value));
+    const good = checks.find((c) => c.success);
+    if (good?.success) { timing?.({ firstTokenMs: firstToken, totalMs: Date.now() - t0, attempts: attempt }); return good.data; }
+    why = checks[0] && !checks[0].success ? issues(checks[0].error) : "no JSON object in the reply";
     messages.push({ role: "assistant", content: text || "(nothing)" }, { role: "user", content: `That reply was not valid (${why}). Reply again with the JSON object only.` });
   }
-  throw new Error(`the OMNI model did not return valid JSON: ${why}`);
+  throw new Error(why === "out of time" ? `the OMNI model ran out of time (${budget} ms)` : `the OMNI model did not return valid JSON: ${why}`);
 }

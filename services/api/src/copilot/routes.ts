@@ -51,14 +51,14 @@ export const copilotRoutes: Plugin = (app: FastifyInstance, ctx: Ctx) => {
       const context = S.CopilotContext.safeParse(jsonPart(parsed, "context"));
       if (!context.success) throw badRequest("the `context` field is not a CopilotContext", context.error.issues);
       // A typed question (the web kitchen's text box) stands in for the voice clip: it is what Kit "heard".
-      const said = parsed.fields.question?.trim().slice(0, 500) || null;
-      const audio = said ? parsed.files.audio ?? null : filePart(parsed, "audio");
+      const question = parsed.fields.question?.trim().slice(0, 500) || null;
+      const audio = question ? parsed.files.audio ?? null : filePart(parsed, "audio");
       // A frame is optional: the camera may not be ready, and the rehearsed HUD answers must work without one.
       const frame = parsed.files.frame?.buffer.length ? parsed.files.frame : null;
       captures.put({ frame: frame?.buffer ?? null, audio: audio?.buffer ?? null, mime: frame?.mime ?? "image/jpeg", note: `query on ${aid}`, context: context.data });
 
       try {
-        return await answerQuery(deps, { assemblyId: aid, context: context.data as CopilotContext, audio: audio?.buffer ?? Buffer.alloc(0), said, frame: frame?.buffer ?? null, uploadMs }, app.log);
+        return await answerQuery(deps, { assemblyId: aid, context: context.data as CopilotContext, audio: audio?.buffer ?? Buffer.alloc(0), question, frame: frame?.buffer ?? null, uploadMs }, app.log);
       } catch (err) {
         // Everything recoverable is already handled inside the pipeline; this is a dead key or a dead network.
         app.log.error({ err: (err as Error).message }, "copilot query failed");

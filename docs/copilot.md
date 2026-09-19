@@ -4,6 +4,11 @@ Owner: Rhythm. Server code in `services/api/src/copilot/`, headset code in
 `apps/quest/Assets/CutOnce/Copilot/`. Nothing in the core imports either — the copilot registers itself
 as a `Plugin` in `services/api/src/plugins.ts` and hands the core one hook.
 
+The copilot is called **Kit** (the prompt says so). In build mode every spoken turn is a Kit turn instead of the
+one below: one call that hears, sees the table and answers, on OMNI or OpenAI (`copilot/kit.ts`, `kitTurn` in
+`pipeline.ts`, and `docs/build-mode.md`). A Kit answer may carry `highlight_twins`, the objects it is about, for the
+headset's glow. E7 and the desk keep the turn below, all on OpenAI.
+
 ## Endpoints
 
 | Endpoint | Body | Returns |
@@ -19,10 +24,11 @@ as a `Plugin` in `services/api/src/plugins.ts` and hands the core one hook.
 ## The turn, stage by stage
 
 ```
-upload → stt → [ retrieve ‖ annotate ] → model (+ at most one tool round) → ground → respond → tts
-         │                                                                              │
-         └─ fast path: "done" / "next" / "back" / "undo" / "mark X built"                └─ streamed
-            skips the model entirely, under 1.5 s
+upload → stt → [ retrieve ‖ annotate ‖ route ] → model (+ at most one tool round) → ground → respond → tts
+         │                          │                                                             │
+         │                          └─ a sure "build ideas" (with its wish): start_scan, no model  └─ streamed
+         └─ fast path: "done" / "next" / "back" / "undo" / "mark X built", "what can I build",
+            "build me a …", "build E7": skips the model entirely, under 1.5 s
 ```
 
 Every stage records its own milliseconds into `timings_ms`, which the Director page shows. The hard cap
@@ -38,7 +44,8 @@ is 9 s (`COPILOT_CAP_MS`); past it the turn falls back to a cached answer, or to
 - **"Undo" steps back** through changes a person made (voice or manual), one per "undo", and never reverses
   the seeded demo state. Its event is noted `undo of evt_…`. With nothing left it answers "There's nothing to undo."
 - **Nothing heard is still an answer.** An empty or failed transcription returns a spoken "I didn't catch
-  that / couldn't hear that. Hold A and ask again." Only a missing `OPENAI_API_KEY` is a 503.
+  that / couldn't hear that. Hold A and ask again." Only a missing `OPENAI_API_KEY` is a 503 (in build mode: no
+  key for OMNI or OpenAI).
 - **A frame is optional.** Without one the headset sends `"camera": null` and no `frame` part; the model
   answers from the tables and documents, and the HUD's cached answers still work.
 - **`CopilotAction` gained a `step_nav` variant** (`{type:"step_nav", direction:"next"|"back"}`) for spoken

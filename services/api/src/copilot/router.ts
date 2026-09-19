@@ -28,11 +28,12 @@ export const ROUTER_SYSTEM = [
 
 /**
  * Which flow a spoken turn wants. Null means "treat it as a question": no provider, a timeout, an error or a malformed
- * answer. On OpenAI it asks the small router model (OPENAI_ROUTER_MODEL); on OMNI, the OMNI model with its own budget.
+ * answer. The pipeline routes on OpenAI, as the rest of an E7 or desk turn runs, with its small router model
+ * (OPENAI_ROUTER_MODEL) and COPILOT_ROUTE_MS.
  */
 export async function routeTurn(cfg: Config, m: CopilotModels, input: RouteInput, ai: AiCall | null): Promise<Routed | null> {
   if (!ai) return null;
-  const budget = ai.provider === "omni" ? cfg.omniRouteMs : m.budgets.route;
+  const budget = m.budgets.route;
   const work = ai.call(cfg, {
     name: "route", model: ai.provider === "openai" ? m.router : ai.model, schema: Routed, system: ROUTER_SYSTEM, timeoutMs: budget,
     text: `MODE: ${input.mode}\nSAID: "${input.transcript}"`,

@@ -82,7 +82,7 @@ describe("a scan of the kit", () => {
     const [idea] = build.kitContext().ideas;
     await build.startIdea(idea!.idea_id);
     expect(build.kitContext()).toMatchObject({ status: "a design is being built", ideas: [], started: idea!.idea_id });
-    expect([build.canRethink(), await build.rethink("make it taller")]).toEqual([false, false]);
+    expect([build.canRethink(), await build.rethink("make it taller", true)]).toEqual([false, false]);
     const { session_id } = (await t.app.inject({ method: "GET", url: "/v1/build/sessions/current", headers: auth })).json();
     await post("/v1/build/scans", { ...kitUpload(), session_id });
     await build.idle();
@@ -178,7 +178,7 @@ describe("the wish", () => {
 
   it("said before a scan reaches that scan's designs, stays through another view (X), and a plain ask clears it", async () => {
     const build = t.app.ctx.hooks.build!;
-    build.expectScan("a birdhouse");
+    build.expectScan("a birdhouse", false);
     const { session_id } = (await post("/v1/build/scans", kitUpload())).json();
     await build.idle();
     expect(asked().at(-1)).toContain('The builder asked: "a birdhouse"');
@@ -188,16 +188,27 @@ describe("the wish", () => {
     await build.idle();
     expect(asked().at(-1)).toContain('The builder asked: "a birdhouse"');
 
-    build.expectScan(null);                                                   // "what can I build?"
+    build.expectScan(null, false);                                                 // "what can I build?"
     await post("/v1/build/scans", { ...kitUpload(), session_id });
     await build.idle();
     expect(asked().at(-1)).not.toContain("The builder asked");
     expect((await current()).wish).toBeNull();
   });
 
+  it("goes with a replayed recording too: the Director's fallback when the headset's own scan fails", async () => {
+    const build = t.app.ctx.hooks.build!;
+    const { scan_id } = (await post("/v1/build/scans", kitUpload())).json();
+    await build.idle();
+    build.expectScan("a birdhouse", false);
+    await post(`/v1/build/scans/${scan_id}/replay`, { labels: "saved" });
+    await build.idle();
+    expect(asked().at(-1)).toContain('The builder asked: "a birdhouse"');
+    expect((await current()).wish).toBe("a birdhouse");
+  });
+
   it("is dropped when no scan follows within a minute: it belongs to that question, not a later one", async () => {
     const build = t.app.ctx.hooks.build!;
-    build.expectScan("a robot");
+    build.expectScan("a robot", false);
     const later = Date.now() + 61_000;
     vi.spyOn(Date, "now").mockReturnValue(later);
     await post("/v1/build/scans", kitUpload());
@@ -211,17 +222,90 @@ describe("the wish", () => {
     nameTwins.mockImplementationOnce(async (d: unknown, ph: unknown, twins: Twin[]) => { await new Promise<void>((r) => { release = r; }); return byShape(d, ph, twins); });
     await post("/v1/build/scans", kitUpload());
     await vi.waitFor(() => expect(nameTwins).toHaveBeenCalled());
-    t.app.ctx.hooks.build!.expectScan("a robot");
+    t.app.ctx.hooks.build!.expectScan("a robot", false);
     release();
     await t.app.ctx.hooks.build!.idle();
     expect(asked().at(-1)).toContain('The builder asked: "a robot"');
+  });
+
+  it("a change keeps what was offered out ('something crazier' brings new ones); a new ask may show it again", async () => {
+    const build = t.app.ctx.hooks.build!;
+    const { session_id } = (await post("/v1/build/scans", kitUpload())).json();
+    await build.idle();
+    const shown = (await current()).ideas.map((i: { title: string }) => i.title);
+    expect(shown.length).toBeGreaterThan(0);
+    await build.rethink("something crazier", true);
+    await build.idle();
+    expect(asked().at(-1)).toContain(`Already offered, do not repeat: ${shown.join(", ")}.`);
+    build.expectScan("something crazier", true);                             // mid-build: the rescan carries the change
+    await post("/v1/build/scans", { ...kitUpload(), session_id });
+    await build.idle();
+    expect(asked().at(-1)).toContain(`Already offered, do not repeat: ${shown.join(", ")}`);
+    await build.rethink("a birdhouse", false);                               // a new ask: the birdhouse shown before may be the answer
+    await build.idle();
+    expect(asked().at(-1)).not.toContain("Already offered");
+    build.expectScan("a robot", false);
+    await post("/v1/build/scans", { ...kitUpload(), session_id });
+    await build.idle();
+    expect(asked().at(-1)).not.toContain("Already offered");
+  });
+
+  it("a change keeps the ask it changes: the designer hears 'a birdhouse, then something crazier'", async () => {
+    const build = t.app.ctx.hooks.build!;
+    await post("/v1/build/scans", kitUpload());
+    await build.idle();
+    await build.rethink("a birdhouse", false);
+    await build.rethink("something crazier", true);
+    await build.idle();
+    expect(asked().at(-1)).toContain('The builder asked: "a birdhouse, then something crazier".');
+    expect([(await current()).wish, build.kitContext().wish]).toEqual(["a birdhouse, then something crazier", "a birdhouse, then something crazier"]);
+    await build.rethink("make it taller", true);                             // the newest change replaces the last one
+    await build.idle();
+    expect(asked().at(-1)).toContain('The builder asked: "a birdhouse, then make it taller".');
+    await build.rethink("a robot", false);                                   // a new ask replaces both
+    await build.idle();
+    expect(asked().at(-1)).toContain('The builder asked: "a robot".');
+  });
+
+  it("only the newest change can bring back a design shown before, by naming it; the ask it changes cannot", async () => {
+    const build = t.app.ctx.hooks.build!;
+    await post("/v1/build/scans", kitUpload());
+    await build.idle();                                                       // offers the laptop riser
+    await build.rethink("make the laptop riser taller", true);
+    await build.idle();
+    expect(asked().at(-1)).not.toContain("Already offered");
+    await build.rethink("a laptop riser", false);
+    await build.rethink("something crazier", true);
+    await build.idle();
+    expect(asked().at(-1)).toContain("Already offered, do not repeat: Laptop riser.");
+  });
+
+  it("said while a rescan is being named, goes to that scan's designs once: no rethink on top, no second scan, nothing left waiting", async () => {
+    const build = t.app.ctx.hooks.build!;
+    const { session_id } = (await post("/v1/build/scans", kitUpload())).json();
+    await build.idle();
+    let release = () => {};
+    nameTwins.mockImplementationOnce(async (d: unknown, ph: unknown, twins: Twin[]) => { await new Promise<void>((r) => { release = r; }); return byShape(d, ph, twins); });
+    await post("/v1/build/scans", { ...kitUpload(), session_id });
+    await vi.waitFor(() => expect(nameTwins).toHaveBeenCalledTimes(2));
+    vi.mocked(jsonCall).mockClear(); seen = [];
+    expect(build.canRethink()).toBe(false);                                   // a rethink now would design twice
+    expect(build.expectScan("a robot", false)).toBe(true);                   // it rides with the scan being named
+    release();
+    await build.idle();
+    expect(asked()).toEqual([expect.stringContaining('The builder asked: "a robot".')]);
+    expect(seen.filter((m) => m.type === "build_ideas" && m.final)).toHaveLength(1);
+    await build.rethink("something crazier", true);
+    await post("/v1/build/scans", { ...kitUpload(), session_id });           // another look: nothing stale re-applied
+    await build.idle();
+    expect(asked().at(-1)).toContain('The builder asked: "a robot, then something crazier".');
   });
 
   it("is replaced by a rethink's request, and tidied (spaces, trailing punctuation)", async () => {
     const build = t.app.ctx.hooks.build!;
     await post("/v1/build/scans", kitUpload());
     await build.idle();
-    expect(await build.rethink("  something   for my phone!! ")).toBe(true);
+    expect(await build.rethink("  something   for my phone!! ", false)).toBe(true);
     await build.idle();
     expect((await current()).wish).toBe("something for my phone");
     expect(asked().at(-1)).toContain('The builder asked: "something for my phone"');

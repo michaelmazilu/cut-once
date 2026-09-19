@@ -149,4 +149,26 @@ describe("tape", () => {
     const apart = draft([step({ place: "o1", at_cm: { x: -10, z: 0 } }), step({ place: "o2", at_cm: { x: 10, z: 0 }, taped_to: ["o1"] })]);
     expect(solve(apart, kitWithBox, { tape: true })).toEqual({ ok: false, reason: "the tall can does not touch the tall can, so tape cannot join them" });
   });
+
+  it("joins only pieces that really touch: two cans corner to corner, 3.3 cm apart, do not", () => {
+    const diagonal = draft([step({ place: "o1", at_cm: { x: 0, z: 0 } }), step({ place: "o2", at_cm: { x: 7, z: 7 }, taped_to: ["o1"] })]);
+    expect(solve(diagonal, kitWithBox, { tape: true })).toEqual({ ok: false, reason: "the tall can does not touch the tall can, so tape cannot join them" });
+    const side = draft([step({ place: "o1", at_cm: { x: 0, z: 0 } }), step({ place: "o2", at_cm: { x: 6.8, z: 0 }, taped_to: ["o1"] })]);
+    expect(solve(side, kitWithBox, { tape: true })).toMatchObject({ ok: true });
+  });
+
+  it("does not make a loose joint hold: a box loose on one can, or on two in a line, falls whatever is taped on top", () => {
+    const pile = new Map([std("tall_can", "o1"), std("tall_can", "o2"), std("pizza_box", "o4"), std("drink_can", "o6")].map((t) => [t.twin_id, t]));
+    const onOne = draft([step({ place: "o1" }), step({ place: "o4", orientation: "flat", on: ["o1"] }), step({ place: "o6", on: ["o4"], taped_to: ["o4"] })]);
+    expect(stands(onOne, pile)).toMatchObject({ ok: false, reason: expect.stringMatching(/^the pizza box overhangs what holds it up/) });
+    const inLine = draft([step({ place: "o1", at_cm: { x: -10, z: 0 } }), step({ place: "o2", at_cm: { x: 10, z: 0 } }),
+      step({ place: "o4", orientation: "flat", on: ["o1", "o2"] }), step({ place: "o6", on: ["o4"], taped_to: ["o4"] })]);
+    expect(stands(inLine, pile)).toMatchObject({ ok: false, reason: expect.stringMatching(/^the pizza box overhangs what holds it up/) });
+  });
+
+  it("counts what rests on a taped piece as held by the tape: a laptop loose on a box taped to one can is too much", () => {
+    const pile = new Map([std("tall_can", "o1"), std("pizza_box", "o4"), std("laptop", "o7")].map((t) => [t.twin_id, t]));
+    const r = stands(draft([step({ place: "o1" }), step({ place: "o4", orientation: "flat", on: ["o1"], taped_to: ["o1"] }), step({ place: "o7", orientation: "flat", on: ["o4"] })]), pile);
+    expect(!r.ok && r.reason).toBe("tape cannot hold the pizza box in place: it weighs 1.8 kg with what rests on it, over 1.5 kg");
+  });
 });

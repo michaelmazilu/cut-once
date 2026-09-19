@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { loadConfig } from "../src/config.js";
 import { jsonCall } from "../src/llm.js";
-import { extractJson, omniJsonCall } from "../src/omni.js";
+import { jsonObjects, omniJsonCall } from "../src/omni.js";
 
 type Body = { model: string; stream: boolean; modalities?: string[]; messages: { role: string; content: unknown }[] };
 const seen: Body[] = [];
@@ -47,14 +47,15 @@ const cfg = (over: object = {}) => loadConfig({}, { omniKey: "k", omniBaseUrl: b
 const A = z.object({ a: z.number() });
 const call = (over: object = {}) => ({ name: "t", system: "Be brief.", text: "Give a.", schema: A, timeoutMs: 5000, ...over });
 
-describe("extractJson", () => {
+describe("jsonObjects", () => {
   it("finds the object inside fences or prose", () => {
-    expect(extractJson('```json\n{"a": 1}\n```')).toEqual({ ok: true, value: { a: 1 } });
-    expect(extractJson('Sure! {"a": 2} Hope that helps.')).toEqual({ ok: true, value: { a: 2 } });
+    expect(jsonObjects('```json\n{"a": 1}\n```')).toEqual([{ a: 1 }]);
+    expect(jsonObjects('Sure! {"a": 2} Hope that helps.')).toEqual([{ a: 2 }]);
   });
-  it("says why when there is none, or it does not parse", () => {
-    expect(extractJson("no idea")).toMatchObject({ ok: false, error: "no JSON object in the reply" });
-    expect(extractJson('{"a": }')).toMatchObject({ ok: false });
+  it("finds each object among thinking, braces in prose and in strings, last first; none when there is none", () => {
+    expect(jsonObjects('<think>maybe {"a": 0}? a {set} of {"b": "}"}</think>\n{"a": 3, "s": "x{y}"}')).toEqual([{ a: 3, s: "x{y}" }, { b: "}" }, { a: 0 }]);
+    expect(jsonObjects('{"a": 1}{"a": 2}')).toEqual([{ a: 2 }, { a: 1 }]);
+    expect([jsonObjects("no idea"), jsonObjects('{"a": }')]).toEqual([[], []]);
   });
 });
 
@@ -99,11 +100,18 @@ describe("omniJsonCall", () => {
     expect(seen).toHaveLength(2);
   });
 
-  it("stops at its deadline even while the reply is still streaming", async () => {
+  it("stops at its deadline even while the reply is still streaming, and says it ran out of time", async () => {
     replies = ["hang"];
     const t0 = Date.now();
-    await expect(omniJsonCall(cfg(), call({ timeoutMs: 300 }))).rejects.toThrow();
+    await expect(omniJsonCall(cfg(), call({ timeoutMs: 300 }))).rejects.toThrow(/^the OMNI model ran out of time \(300 ms\)$/);
     expect(Date.now() - t0).toBeLessThan(2000);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("takes the answer from a reply with thinking or an example before it, with no second call", async () => {
+    replies = [['<think>They want {"a": "some number"}, say ', '{"a": 1}.</think>\n', '{"a": 5}']];
+    expect(await omniJsonCall(cfg(), call())).toEqual({ a: 5 });
+    expect(seen).toHaveLength(1);
   });
 
   it("refuses without a key or a base URL, and calls nothing", async () => {

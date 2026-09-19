@@ -6,7 +6,7 @@ describe("Kit and OMNI settings", () => {
     const cfg = loadConfig({});
     expect(cfg.kitAi).toEqual({ turn: "omni", label: "omni", ideas: "omni" });
     expect([cfg.omniKey, cfg.omniBaseUrl, cfg.omniModel, cfg.omniIdeasModel, cfg.omniAudio]).toEqual(["", "", "qwen3.5-omni-flash", "", "dataurl"]);
-    expect([cfg.kitTurnMs, cfg.buildLiveMs, cfg.omniRouteMs]).toEqual([6000, 8000, 1500]);
+    expect([cfg.kitTurnMs, cfg.buildLiveMs]).toEqual([6000, 8000]);
   });
   it("lets one setting move every job, and one job be moved on its own", () => {
     expect(loadConfig({ KIT_AI: "openai" }).kitAi).toEqual({ turn: "openai", label: "openai", ideas: "openai" });
@@ -15,9 +15,9 @@ describe("Kit and OMNI settings", () => {
   });
   it("reads the OMNI connection and the budgets", () => {
     const cfg = loadConfig({ OMNI_API_KEY: "k", OMNI_BASE_URL: "https://omni.example/v1/", OMNI_MODEL: "qwen3.5-omni-plus", OMNI_IDEAS_MODEL: "qwen-x",
-      OMNI_AUDIO: "base64", KIT_TURN_MS: "4000", BUILD_LIVE_MS: "5000", OMNI_ROUTE_MS: "900" });
+      OMNI_AUDIO: "base64", KIT_TURN_MS: "4000", BUILD_LIVE_MS: "5000" });
     expect([cfg.omniKey, cfg.omniBaseUrl, cfg.omniModel, cfg.omniIdeasModel, cfg.omniAudio]).toEqual(["k", "https://omni.example/v1", "qwen3.5-omni-plus", "qwen-x", "base64"]);
-    expect([cfg.kitTurnMs, cfg.buildLiveMs, cfg.omniRouteMs]).toEqual([4000, 5000, 900]);
+    expect([cfg.kitTurnMs, cfg.buildLiveMs]).toEqual([4000, 5000]);
     expect(loadConfig({ KIT_TURN_MS: "soon" }).kitTurnMs).toBe(6000);
   });
 });

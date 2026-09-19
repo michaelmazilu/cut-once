@@ -13,6 +13,8 @@ export interface FastPathInput {
  */
 export interface FastPath {
   action: CopilotAction | null; answer_text: string; highlight_parts: string[]; note?: string; wish?: string | null;
+  /** With a wish: it changes the designs on show ("make me something crazier"), rather than asking for a new thing. */
+  change?: boolean;
 }
 
 /**
@@ -54,19 +56,26 @@ export function resolvePart(phrase: string, parts: Part[]): Part | null {
 
 const PLAIN_ASK = /^(what can (i|we) (build|make)( with (this|these|that|all this|all of this|this stuff))?|what could (i|we) (build|make)( with (this|these|that))?|help me build something|build something|make something)$/;
 const ASKING = "(?:hey kit )?(?:kit )?(?:(?:can|could|would|will) you |please )?";
-/** "Build me a birdhouse", "let's make a robot", "can we build a tower with these": the thing asked for, as said. */
-const WISH_PHRASES = [
+/**
+ * "Build me a birdhouse", "let's make a robot", "can we build a tower with these": the thing asked for, as said.
+ * Outside build mode "make" counts only with "me": "make a list", "make a note", "can I make a change" are ordinary
+ * requests about E7 or the desk, and must reach the router and the answer model as before.
+ */
+const wishPhrases = (verb: string) => [
   new RegExp(`^${ASKING}(?:help me )?(?:build|make) me (an? .+|something(?: .+)?)$`),
-  /^(?:hey kit )?(?:i want to|i wanna|i would like to|id like to|lets|let us) (?:build|make) (an? .+|something(?: .+)?)$/,
-  /^(?:hey kit )?(?:can|could) (?:i|we) (?:build|make) (an? .+?)(?: with (?:this|these|that|all this|this stuff))?$/,
-  new RegExp(`^${ASKING}(?:help me )?(?:build|make) (an? .+)$`),
+  new RegExp(`^(?:hey kit )?(?:i want to|i wanna|i would like to|id like to|lets|let us) ${verb} (an? .+|something(?: .+)?)$`),
+  new RegExp(`^(?:hey kit )?(?:can|could) (?:i|we) ${verb} (an? .+?)(?: with (?:this|these|that|all this|this stuff))?$`),
+  new RegExp(`^${ASKING}(?:help me )?${verb} (an? .+)$`),
 ];
+const WISH_PHRASES = { build: wishPhrases("(?:build|make)"), elsewhere: wishPhrases("build") };
+/** "Something crazier", "something else": a change to the designs on show, so those are not offered again. */
+const CHANGE = /^something (else|different|new|other|more|less|crazier|wilder|weirder|cooler|bigger|smaller|taller|shorter|better|fancier|simpler|harder|easier|sillier|funnier|stranger|stronger|sturdier|longer|wider|higher|lower|prettier|nicer)\b/;
 /**
  * The wish in a sentence, or null. Kept to short, plain asks: a long one, and "a smaller one" / "another one" (a
  * change to designs already on show, not a new thing), are left to the model, which knows what is on show.
  */
-function wishIn(text: string): string | null {
-  for (const re of WISH_PHRASES) {
+function wishIn(text: string, mode: FastPathInput["mode"]): string | null {
+  for (const re of WISH_PHRASES[mode === "build" ? "build" : "elsewhere"]) {
     const wish = re.exec(text)?.[1]?.trim();
     if (!wish) continue;
     return wish.split(" ").length <= 10 && !/\bone$/.test(wish) ? wish : null;
@@ -92,9 +101,10 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
   // "What can I build?": the rehearsed lines never depend on a model. The headset scans and uploads. A plain ask
   // forgets the last wish; "build me a birdhouse" carries its own; another look ("scan again") keeps the one there is.
   // "Look again" is a rescan only in build mode: anywhere else it asks the copilot to look at the part again.
-  if (PLAIN_ASK.test(text)) return { action: { type: "start_scan" }, answer_text: "Let me see what you've got.", highlight_parts: [], wish: null };
-  const wish = wishIn(text);
-  if (wish) return { action: { type: "start_scan" }, answer_text: `Let me see how to make ${wish} from what's here.`, highlight_parts: [], wish };
+  const wish = wishIn(text, mode);
+  // "Build me something" is a plain ask too.
+  if (PLAIN_ASK.test(text) || wish === "something") return { action: { type: "start_scan" }, answer_text: "Let me see what you've got.", highlight_parts: [], wish: null };
+  if (wish) return { action: { type: "start_scan" }, answer_text: `Let me see how to make ${wish} from what's here.`, highlight_parts: [], wish, change: CHANGE.test(wish) };
   if (/^scan (this|that|again|the table)$/.test(text) || (mode === "build" && text === "look again")) {
     return { action: { type: "start_scan" }, answer_text: "Let me see what you've got.", highlight_parts: [] };
   }

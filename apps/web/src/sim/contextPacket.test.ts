@@ -39,5 +39,10 @@ describe("buildContextPacket", () => {
     expect(Strict.CopilotContext.parse(packet).visible_parts.map((v) => v.part_id)).toEqual(["part_a"]);
     expect(packet.camera!.cx).toBe(640);
     expect(packet.selection_source).toBe("controller_ray");
+    expect(packet.mode).toBe("overlay");
+  });
+  it("says build mode when the pretend headset is in it, so Kit answers the turn", () => {
+    const packet = buildContextPacket({ assemblyId: "asm_demo_1", planRevision: 1, stateVersion: 0, selected: null, currentStepId: null, parts: [], camera: cam(), width: 1280, height: 960, mode: "build" });
+    expect(Strict.CopilotContext.parse(packet)).toMatchObject({ mode: "build", selection_source: "none" });
   });
 });

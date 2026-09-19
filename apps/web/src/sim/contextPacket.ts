@@ -35,11 +35,14 @@ export function projectBox(camera: THREE.PerspectiveCamera, box: Aabb, width: nu
 
 const randomHex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => (b % 16).toString(16)).join("");
 
-/** The packet the headset sends with every question. Parts less than 5% in view are left out. */
+/**
+ * The packet the headset sends with every question. Parts less than 5% in view are left out. `mode` "build" (from the
+ * first scan to the end of the walkthrough) makes the turn Kit's.
+ */
 export function buildContextPacket(args: {
   assemblyId: string; planRevision: number; stateVersion: number; selected: string | null; currentStepId: string | null;
   parts: { part_id: string; state: PartState; box: Aabb }[];
-  camera: THREE.PerspectiveCamera; width: number; height: number; scriptedQueryId?: string | null;
+  camera: THREE.PerspectiveCamera; width: number; height: number; scriptedQueryId?: string | null; mode?: "overlay" | "build";
 }): CopilotContext {
   const { camera, width, height } = args;
   const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -52,7 +55,7 @@ export function buildContextPacket(args: {
     assembly_id: args.assemblyId,
     plan_revision: args.planRevision,
     state_version: args.stateVersion,
-    mode: "overlay",
+    mode: args.mode ?? "overlay",
     selected_part_id: args.selected,
     selection_source: args.selected ? "controller_ray" : "none",
     current_step_id: args.currentStepId,

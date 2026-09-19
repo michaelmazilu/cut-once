@@ -11,6 +11,10 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/CutOnce/Scenes/QuestBaseline.unity
     guid: 2ea3225cdd4b84f5686f0ab5c1fd7c81
+  - enabled: 1
+    path: Assets/CutOnce/Scenes/ObjectScanner.unity
+    guid: 5bae9b6a04ca9408cb29d88673533c25
   m_configObjects:
+    com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 87ba307dce25448f4981c88aa002d381, type: 2}
     com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 7c867319d6eb643a5a9290ff45f1cdb8, type: 2}

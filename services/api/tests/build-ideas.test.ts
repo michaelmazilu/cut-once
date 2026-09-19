@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BuildIdea, Surface, Twin } from "@cutonce/schemas";
 import { REPO_ROOT, loadConfig } from "../src/config.js";
 import { loadRules, loadVocab, standardShape } from "../src/build/data.js";
-import { canonical, computeIdeas, describeFound, summary } from "../src/build/ideas.js";
+import { canonical, computeIdeas, describeFound, hasTape, summary } from "../src/build/ideas.js";
 import { twin } from "./build-synth.js";
 
 const vocab = loadVocab(REPO_ROOT), rules = loadRules(REPO_ROOT, vocab);
@@ -88,6 +88,21 @@ describe("computeIdeas: the rehearsal cache", () => {
     expect(out.map((i) => [i.title, i.made])).toEqual([["Can tower", "live"]]);
   });
 
+  it("keeps waiting for the live answer when the cache holds only designs already offered", async () => {
+    const d = deps();
+    await computeIdeas(d, input, () => {});                                        // rehearsal: caches the can tower
+    const late = deps({ cacheDir: d.cacheDir, liveMs: 20, call: slow(120, [phoneDraft]) });
+    expect((await computeIdeas(late, { ...input, offered: ["Can tower"] }, () => {})).map((i) => [i.title, i.made])).toEqual([["Phone stand", "live"]]);
+  });
+
+  it("finds the designs cached at rehearsal whichever model asks now, or with no model at all", async () => {
+    const d = deps({ model: "qwen3.5-omni-flash" });
+    await computeIdeas(d, input, () => {});
+    const down = vi.fn(async () => { throw new Error("connect ETIMEDOUT"); });
+    expect((await computeIdeas({ ...d, model: "gpt-5.6-luna", call: down }, input, () => {})).map((i) => i.made)).toEqual(["cache"]);
+    expect((await computeIdeas({ ...d, model: "none", call: null }, input, () => {})).map((i) => i.made)).toEqual(["cache"]);
+  });
+
   it("uses the cache when the live call fails, and the stored rules when there is no cache either", async () => {
     const d = deps();
     await computeIdeas(d, input, () => {});
@@ -113,10 +128,11 @@ describe("computeIdeas: the rehearsal cache", () => {
 });
 
 describe("computeIdeas: no repeats", () => {
-  it("never offers again what this session already offered, unless the request names it", async () => {
+  // Which titles count as offered is the session's call (a change that names one brings it back): here it is only obeyed.
+  it("never offers again what it is told was offered, whatever the request says", async () => {
     const d = deps({ call: vi.fn(async () => ({ ideas: [aiDraft, phoneDraft] })) });
     expect((await computeIdeas(d, { ...input, offered: ["Can tower"] }, () => {})).map((i) => i.title)).toEqual(["Phone stand"]);
-    expect((await computeIdeas(d, { ...input, offered: ["Can tower"], request: "the can tower again" }, () => {})).map((i) => i.title).sort()).toEqual(["Can tower", "Phone stand"]);
+    expect((await computeIdeas(d, { ...input, offered: ["Can tower"], request: "a can tower" }, () => {})).map((i) => i.title)).toEqual(["Phone stand"]);
   });
   it("offers a repeat rather than nothing, when every design it can find was offered already", async () => {
     const out = await computeIdeas(deps({ call: vi.fn(async () => ({ ideas: [aiDraft] })) }), { ...input, offered: ["Can tower", "Laptop riser"], request: "make it taller" }, () => {});
@@ -154,6 +170,11 @@ describe("computeIdeas: where the design goes", () => {
 });
 
 describe("tape in the design prompt", () => {
+  it("knows tape by name, and a tape measure is not tape", () => {
+    const named = (label: string) => twin({ twin_id: "o9", name: "other", label });
+    expect([named("duct tape"), named("masking tape roll"), named("tape measure"), named("measuring tape")].map((t) => hasTape([t]))).toEqual([true, true, false, false]);
+  });
+
   it("tells the model about tape only when a roll is on the table, and designs may use it", async () => {
     const roll = twin({ twin_id: "o9", name: "tape_roll", label: "tape roll", material: "plastic", confidence: 0.9, snapped: true, shape: { type: "cylinder", axis: "y", diameter: 0.11, length: 0.048 }, position: [0.4, 0.764, 0.5] });
     const d = deps();
@@ -169,12 +190,11 @@ describe("tape in the design prompt", () => {
 describe("canonical: the cache key", () => {
   const box = (id: string, size: [number, number, number]) => twin({ twin_id: id, name: "cardboard_box", label: "cardboard box", snapped: false, shape: { type: "box", size } });
   it("is the same for the same things measured a little differently, and for new ids", () =>
-    expect(canonical([box("o1", [0.204, 0.1, 0.3])], "a birdhouse", "m").key).toBe(canonical([box("o7", [0.212, 0.098, 0.305])], "A birdhouse!", "m").key));
-  it("changes with the wish, the model, and what the things are", () => {
-    const base = canonical([box("o1", [0.2, 0.1, 0.3])], "a birdhouse", "m").key;
-    expect(canonical([box("o1", [0.2, 0.1, 0.3])], "a robot", "m").key).not.toBe(base);
-    expect(canonical([box("o1", [0.2, 0.1, 0.3])], "a birdhouse", "other-model").key).not.toBe(base);
-    expect(canonical([box("o1", [0.2, 0.1, 0.45])], "a birdhouse", "m").key).not.toBe(base);
+    expect(canonical([box("o1", [0.204, 0.1, 0.3])], "a birdhouse").key).toBe(canonical([box("o7", [0.212, 0.098, 0.305])], "A birdhouse!").key));
+  it("changes with the wish and what the things are", () => {
+    const base = canonical([box("o1", [0.2, 0.1, 0.3])], "a birdhouse").key;
+    expect(canonical([box("o1", [0.2, 0.1, 0.3])], "a robot").key).not.toBe(base);
+    expect(canonical([box("o1", [0.2, 0.1, 0.45])], "a birdhouse").key).not.toBe(base);
     const thermos = twin({ twin_id: "o1", name: "other", label: "thermos" }), vase = twin({ twin_id: "o1", name: "other", label: "vase" });
     expect(canonical([thermos]).key).not.toBe(canonical([vase]).key);
   });

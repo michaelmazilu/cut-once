@@ -1,4 +1,4 @@
-import { aabbGap, aabbOverlapDepth, type Aabb } from "@cutonce/project-model";
+import { aabbOverlapDepth, type Aabb } from "@cutonce/project-model";
 import type { IdeaDraft, Orientation, Twin, TwinShape, Vec3 } from "@cutonce/schemas";
 import { halfOf } from "./shape.js";
 
@@ -9,9 +9,29 @@ export type Solved = { ok: true; placed: Placed[] } | { ok: false; reason: strin
 
 /** validate.ts's TOUCH_TOLERANCE: tops further apart than this fail V4 ("floats"). */
 const TOUCH = 0.002;
-/** Tape joins pieces that touch: their boxes within 5 mm. */
+/** Tape joins pieces that touch: within 5 mm of each other. */
 const TAPE_GAP = 0.005;
 const mm = (m: number) => Math.round(m * 1000);
+
+/**
+ * The gap between two placed pieces, exact. Every piece is an upright prism (a box, or a cylinder standing up), so the
+ * gap is the vertical gap and the gap between footprints, combined: two cans corner to corner are apart, though their
+ * bounding boxes nearly touch.
+ */
+export function gapBetween(a: Placed, b: Placed): number {
+  const ha = halfOf(a.shape), hb = halfOf(b.shape);
+  const dy = Math.max(0, a.position[1] - ha[1] - (b.position[1] + hb[1]), b.position[1] - hb[1] - (a.position[1] + ha[1]));
+  const round = (p: Placed) => p.shape.type === "cylinder" && p.shape.axis === "y";
+  // How far a point on the table is from a piece's footprint (0 inside it).
+  const reach = (p: Placed, h: Vec3, x: number, z: number) => round(p)
+    ? Math.max(0, Math.hypot(x - p.position[0], z - p.position[2]) - h[0])
+    : Math.hypot(Math.max(0, Math.abs(x - p.position[0]) - h[0]), Math.max(0, Math.abs(z - p.position[2]) - h[2]));
+  let across: number;
+  if (round(a)) across = Math.max(0, reach(b, hb, a.position[0], a.position[2]) - ha[0]);
+  else if (round(b)) across = Math.max(0, reach(a, ha, b.position[0], b.position[2]) - hb[0]);
+  else across = Math.hypot(Math.max(0, Math.abs(a.position[0] - b.position[0]) - ha[0] - hb[0]), Math.max(0, Math.abs(a.position[2] - b.position[2]) - ha[2] - hb[2]));
+  return Math.hypot(dy, across);
+}
 
 /**
  * The shape as it rests. Orientation is expressed by the order of a box's sides and a cylinder's axis — never by a
@@ -98,7 +118,7 @@ export function solve(draft: IdeaDraft, twins: Map<string, Twin>, opts: { tape?:
     for (const q of order) if (aabbOverlapDepth(aabbOfPlaced(p), aabbOfPlaced(q)) > 0.001) return fail(`the ${t.label} would overlap the ${q.label}`);
     for (const id of tapedTo) {
       const other = placed.get(id)!;
-      if (aabbGap(aabbOfPlaced(p), aabbOfPlaced(other)) > TAPE_GAP) return fail(`the ${t.label} does not touch the ${other.label}, so tape cannot join them`);
+      if (gapBetween(p, other) > TAPE_GAP) return fail(`the ${t.label} does not touch the ${other.label}, so tape cannot join them`);
     }
     placed.set(t.twin_id, p); order.push(p);
     if (s.on.length === 0) lastOnTable = p;

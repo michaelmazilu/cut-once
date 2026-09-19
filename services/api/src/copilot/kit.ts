@@ -93,23 +93,31 @@ export function kitContextText(ctx: KitBuildContext, building: KitBuilding | nul
   ].join("\n");
 }
 
+/**
+ * Where a sentence says which design: "the left one", "the one on the right", "the second design", or an ordinal that
+ * ends it ("the third"). A position word anywhere else is not one: "that's right", "I left it there".
+ */
+const POSITION = /\b(first|second|third|last|left|leftmost|right|rightmost|middle|centre|center) (?:one|design|option|idea)\b|\bon the (left|right)\b|\b(first|second|third|last)$/g;
+
 /** "The left one", "the second one": a design on show by where it stands (the headset lays them out left to right). */
 export function pickByPosition<T>(said: string, ideas: T[]): T | null {
-  const t = ` ${normalise(said)} `, n = ideas.length;
-  if (n === 0) return null;
-  if (/ (first|left|leftmost) /.test(t)) return ideas[0]!;
-  if (/ (middle|centre|center) /.test(t)) return n === 3 ? ideas[1]! : null;
-  if (/ second /.test(t)) return ideas[1] ?? null;
-  if (/ third /.test(t)) return ideas[2] ?? null;
-  if (/ (right|rightmost|last) /.test(t)) return ideas[n - 1]!;
-  return null;
+  const n = ideas.length;
+  const where = new Set([...normalise(said).matchAll(POSITION)].map((m) => m[1] ?? m[2] ?? m[3]));
+  if (n === 0 || where.size !== 1) return null;                     // none, or "not the left one, the right one": ask
+  const w = [...where][0]!;
+  if (w === "first" || w === "left" || w === "leftmost") return ideas[0]!;
+  if (w === "middle" || w === "centre" || w === "center") return n === 3 ? ideas[1]! : null;
+  if (w === "second") return ideas[1] ?? null;
+  if (w === "third") return ideas[2] ?? null;
+  return ideas[n - 1]!;                                             // right, rightmost, last
 }
 
 export type KitDecision =
   | { kind: "say"; text: string; clarify: boolean }
   | { kind: "command"; phrase: "done" | "next" | "back" | "undo" }
-  | { kind: "scan"; wish: string | null; text: string }
-  | { kind: "rethink"; wish: string; text: string }
+  /** change: a change to the designs on show ("something crazier"), so those are not offered again; else a new ask. */
+  | { kind: "scan"; wish: string | null; text: string; change: boolean }
+  | { kind: "rethink"; wish: string; text: string; change: boolean }
   | { kind: "start"; ideaId: string; title: string };
 
 export interface KitAt {
@@ -123,33 +131,51 @@ export interface KitAt {
 export const KIT_ACT_MIN = 0.6, KIT_CHANGE_MIN = 0.8;
 
 /**
+ * What Kit says when it will not act on what it understood. Never the model's answer: that describes the action
+ * ("Marked it done."), which did not happen. Each names the command that does it, so the next turn is exact.
+ */
+const ASK_BACK = {
+  ideas: "Do you want designs? Say what you'd like to build.",
+  change: "Do you want different designs? Say what to change.",
+  done: "Is this step finished? Say done when it is.",
+  undo: "Do you want to undo the last change? Say undo.",
+  next: "Do you want the next step? Say next.",
+  back: "Do you want the step before? Say back.",
+} as const;
+
+/**
  * What to do with a Kit turn. Deterministic: the model's intent chooses among actions code already has; anything it
  * is unsure of becomes a spoken question back, and nothing that changes the build happens on a question.
  */
 export function decideKit(kit: KitTurn, at: KitAt): KitDecision {
   const say = (text: string, clarify: boolean): KitDecision => ({ kind: "say", text, clarify });
-  const unsure = say(kit.answer.trim() || "Sorry, what would you like to do?", true);
+  const askBack = (intent: keyof typeof ASK_BACK) => say(ASK_BACK[intent], true);
   const sure = kit.confidence >= KIT_ACT_MIN;
   switch (kit.intent) {
     case "question": return say(kit.answer.trim() || "I don't have an answer for that. Try asking another way.", kit.confidence < 0.5);
     case "ideas": case "change": {
-      if (!sure) return unsure;
-      const wish = kit.wish?.trim() || (kit.intent === "change" ? kit.heard.trim() : "") || null;
-      if (wish && at.canRethink) return { kind: "rethink", wish, text: kit.answer.trim() || `Let me see how to make ${wish} from what's here.` };
-      const text = kit.answer.trim() || (kit.intent === "change" ? "Let me look again with that in mind." : wish ? `Let me see how to make ${wish} from what's here.` : "Let me see what you've got.");
-      return { kind: "scan", wish, text };
+      if (!sure) return askBack(kit.intent);
+      const change = kit.intent === "change";
+      const wish = kit.wish?.trim() || (change ? kit.heard.trim() : "") || null;
+      if (wish && at.canRethink) return { kind: "rethink", wish, text: kit.answer.trim() || `Let me see how to make ${wish} from what's here.`, change };
+      const text = kit.answer.trim() || (change ? "Let me look again with that in mind." : wish ? `Let me see how to make ${wish} from what's here.` : "Let me see what you've got.");
+      return { kind: "scan", wish, text, change };
     }
     case "pick": {
       if (at.building) return say("You're building one already. Say what you'd like instead, and I'll look again.", true);
-      const idea = at.ideas.find((i) => i.idea_id === kit.pick) ?? at.byName(kit.heard) ?? pickByPosition(kit.heard, at.ideas);
-      return idea && sure ? { kind: "start", ideaId: idea.idea_id, title: idea.title } : say(kit.answer.trim() || "Which one? Say its name, or the left, middle or right one.", true);
+      if (at.ideas.length === 0) return say("There's nothing on show to pick yet. Ask me what you can build.", true);
+      // The model's pick by id, or by name (it may give the title), then the name said, then where it stands.
+      const idea = at.ideas.find((i) => i.idea_id === kit.pick) ?? (kit.pick ? at.byName(kit.pick) : null) ?? at.byName(kit.heard) ?? pickByPosition(kit.heard, at.ideas);
+      if (!idea) return say("Which one? Say its name, or the left, middle or right one.", true);
+      return sure ? { kind: "start", ideaId: idea.idea_id, title: idea.title } : say(`Do you want the ${idea.title.toLowerCase()}? Say its name to start it.`, true);
     }
     case "done": case "undo":
-      return kit.confidence >= KIT_CHANGE_MIN && !isQuestion(kit.heard) ? { kind: "command", phrase: kit.intent } : unsure;
+      return kit.confidence >= KIT_CHANGE_MIN && !isQuestion(kit.heard) ? { kind: "command", phrase: kit.intent } : askBack(kit.intent);
     case "next": case "back":
-      return sure ? { kind: "command", phrase: kit.intent } : unsure;
+      return sure ? { kind: "command", phrase: kit.intent } : askBack(kit.intent);
     default:
-      return unsure;
+      // Unclear: the model's answer is the question back (KIT_SYSTEM asks it for one).
+      return say(kit.answer.trim() || "Sorry, what would you like to do?", true);
   }
 }
 
@@ -160,9 +186,12 @@ async function smaller(frame: Buffer): Promise<Buffer> {
 }
 
 export interface KitTurnInput {
-  cfg: Config; m: CopilotModels; ai: AiCall; audio: Buffer; said?: string | null; frame: Buffer | null;
+  cfg: Config; m: CopilotModels; ai: AiCall; audio: Buffer; frame: Buffer | null;
   context: KitBuildContext; building: KitBuilding | null; turns: KitTurnHistory[]; timeoutMs: number;
+  /** The words, when the caller already has them: transcribed for the voice commands, or typed instead of spoken. */
+  transcript?: string;
 }
+/** sttMs: null when this call transcribed nothing (OMNI, or a transcript given). */
 export interface KitTurnResult { kit: KitTurn; sttMs: number | null; modelMs: number }
 
 /**
@@ -172,7 +201,7 @@ export interface KitTurnResult { kit: KitTurn; sttMs: number | null; modelMs: nu
 export async function runKitTurn(input: KitTurnInput): Promise<KitTurnResult> {
   const { cfg, m, ai } = input;
   const started = Date.now();
-  let said: string | null = input.said ?? null, sttMs: number | null = said === null ? null : 0;
+  let said: string | null = input.transcript ?? null, sttMs: number | null = null;
   if (said === null && ai.provider === "openai") {
     said = await transcribe(cfg, m, input.audio);
     sttMs = Date.now() - started;
@@ -183,7 +212,7 @@ export async function runKitTurn(input: KitTurnInput): Promise<KitTurnResult> {
   const kit = KitTurn.parse(await ai.call(cfg, {
     name: "kit_turn", model: ai.model, schema: KitTurn, system: KIT_SYSTEM, text: kitContextText(input.context, input.building, said, input.turns),
     timeoutMs: Math.max(1000, input.timeoutMs - (modelStart - started)), images: photo ? [{ data: photo, mime: "image/jpeg" as const }] : [],
-    ...(ai.provider === "omni" && said === null ? { audio: { data: input.audio, format: "wav" as const } } : {}),
+    ...(ai.provider === "omni" && input.transcript === undefined ? { audio: { data: input.audio, format: "wav" as const } } : {}),
   }));
   return { kit: said === null ? kit : { ...kit, heard: said }, sttMs, modelMs: Date.now() - modelStart };
 }

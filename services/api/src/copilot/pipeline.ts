@@ -1,9 +1,9 @@
 import { ulid } from "ulid";
 import type { CopilotAction, CopilotContext, CopilotResponse, RetrievedChunk } from "@cutonce/schemas";
-import { aiFor, type AiCall } from "../ai.js";
+import { aiFor, ready, type AiCall } from "../ai.js";
 import type { Ctx } from "../app.js";
 import { isBuildPlan } from "../build/plan.js";
-import { pickIdea } from "../build/session.js";
+import { cleanWish, pickIdea } from "../build/session.js";
 import { retrieve } from "../search/retrieve.js";
 import { annotateFrame } from "./annotate.js";
 import { ask, ground } from "./answer.js";
@@ -18,8 +18,8 @@ import { transcribe } from "./stt.js";
 import type { Speech } from "./tts.js";
 import type { TurnMemory } from "./turns.js";
 
-/** `said`: a typed question, used instead of hearing `audio` (which is then empty). */
-export interface QueryInput { assemblyId: string; context: CopilotContext; audio: Buffer; said?: string | null; frame: Buffer | null; uploadMs: number }
+/** `question`: typed instead of spoken, used in place of hearing `audio` (which is then empty). */
+export interface QueryInput { assemblyId: string; context: CopilotContext; audio: Buffer; question?: string | null; frame: Buffer | null; uploadMs: number }
 export interface Deps { ctx: Ctx; models: CopilotModels; speech: Speech; turns: TurnMemory; cache: DemoCache }
 
 type Log = { info: (o: object, m: string) => void; warn: (o: object, m: string) => void };
@@ -86,7 +86,7 @@ export async function answerQuery(deps: Deps, input: QueryInput, log: Log): Prom
   }
 
   // Build mode: one Kit turn hears, sees and answers (OMNI by default, OpenAI behind a switch). Other runs go on
-  // below, exactly as before. With no provider at all, build mode falls through to the same 503 as they do.
+  // below, on OpenAI, as they did before Kit. With no provider at all, build mode falls through to the same 503.
   if (input.context.mode === "build" && ctx.hooks.build) {
     const kit = await kitTurn(deps, input, g, turnId, timings, t0, recordTurn, log);
     if (kit) return kit;
@@ -98,7 +98,7 @@ export async function answerQuery(deps: Deps, input: QueryInput, log: Log): Prom
   const sttStart = Date.now();
   let transcript = "";
   let sttFailed = false;
-  try { transcript = input.said ?? await transcribe(ctx.cfg, m, input.audio); }
+  try { transcript = input.question ?? await transcribe(ctx.cfg, m, input.audio); }
   catch (err) { sttFailed = true; log.warn({ turn: turnId, err: (err as Error).message }, "transcription failed"); }
   timings.stt = since(sttStart);
   if (!transcript) return unheard(deps, turnId, sttFailed, timings, t0, recordTurn);
@@ -130,11 +130,14 @@ export async function answerQuery(deps: Deps, input: QueryInput, log: Log): Prom
 
   // The router: does this turn want build ideas? A sure yes scans and skips the answer model; anything else is a question.
   const routeStart = Date.now();
-  const routed = await routeTurn(ctx.cfg, m, { transcript, mode: input.context.mode }, aiFor(ctx.cfg, "turn"));
+  // On OpenAI, as the rest of this turn is (it needs OpenAI's key above): Kit's provider is build mode's business.
+  const routed = await routeTurn(ctx.cfg, m, { transcript, mode: input.context.mode }, aiFor(ctx.cfg, "turn", "openai"));
   timings.route = since(routeStart);
   if (routeOutcome(routed) === "scan") {
-    ctx.hooks.build?.expectScan(routed?.wish ?? null);
-    return quick(deps, turnId, transcript, "Let me see what you've got.", { type: "start_scan" }, timings, t0, recordTurn);
+    const wish = cleanWish(routed?.wish ?? null);
+    const taken = ctx.hooks.build?.expectScan(wish, false) ?? false;     // a scan being read takes it: no second scan
+    const text = wish ? `Let me see how to make ${wish} from what's here.` : "Let me see what you've got.";
+    return quick(deps, turnId, transcript, text, taken ? null : { type: "start_scan" }, timings, t0, recordTurn);
   }
   const [chunks, annotated] = await Promise.all([retrieving, annotating]);
 
@@ -201,10 +204,12 @@ async function respondFast(
 ): Promise<CopilotResponse> {
   const { ctx, speech } = deps;
   if (fast.action?.type === "start_scan" && fast.wish !== undefined && ctx.hooks.build) {
+    // Said outright, a wish is a new ask ("build me a birdhouse") or a change ("make me something crazier").
+    const change = fast.change ?? false;
     if (fast.wish && input.context.mode === "build" && ctx.hooks.build.canRethink()) {
-      await ctx.hooks.build.rethink(fast.wish);
+      await ctx.hooks.build.rethink(fast.wish, change);
       fast.action = null;
-    } else ctx.hooks.build.expectScan(fast.wish);
+    } else if (ctx.hooks.build.expectScan(fast.wish, change)) fast.action = null;   // a scan being read takes it
   }
   if (fast.action) await applyAction(deps, input.assemblyId, fast.action, "operator", { confidence: 1, note: fast.note ?? "spoken command" });
   speech.start(turnId, fast.answer_text);
@@ -237,16 +242,77 @@ async function kitTurn(
   const primary = aiFor(ctx.cfg, "turn");
   if (!primary) return null;
   const context = build.kitContext();
+  const fastInput = { plan: g.plan, state: g.state, selectedPartId: input.context.selected_part_id, recentEvents: g.recentEvents, mode: "build" as const };
+  // A design on show named outright ("let's build the robot", even "build me a robot" with a Robot on show) is that
+  // design, before a wish phrase can take it for a new ask. Only the name and picking words: a question is a question.
+  const byName = (words: string) => (context.started ? null : pickIdea(words, context.ideas));
+  const start = async (idea: { idea_id: string; title: string }, heard: string, extra: Partial<CopilotResponse> = {}): Promise<CopilotResponse> => {
+    try {
+      await build.startIdea(idea.idea_id);
+      return quick(deps, turnId, heard, `Building the ${idea.title.toLowerCase()}. Watch the pieces.`, null, timings, t0, recordTurn, false, extra);
+    } catch (err) {
+      // The idea was picked but its run could not be made (a full disk, say). In front of judges a reply beats an error.
+      log.warn({ turn: turnId, idea: idea.idea_id, err: (err as Error).message }, "could not start the picked build idea");
+      return quick(deps, turnId, heard, "I couldn't start that build. Try again.", null, timings, t0, recordTurn, true, extra);
+    }
+  };
+
+  // Words that need no model: a design on show named outright, or a voice command said outright.
+  const direct = (words: string): Promise<CopilotResponse> | null => {
+    const named = byName(words);
+    if (named) return start(named, words);
+    const fast = matchFastPath(words, fastInput);
+    return fast ? respondFast(deps, input, g, fast, words, turnId, timings, t0, recordTurn, log) : null;
+  };
+
+  // On OpenAI the words come before the model: a voice command said outright ("done", "next") is answered from the
+  // transcript with no model call, as fast as before Kit.
+  // A typed question (the web kitchen's box) is already words: nothing to hear, on either provider.
+  const typed = !!input.question;
+  let transcript: string | undefined = input.question ?? undefined;
+  if (transcript === undefined && primary.provider === "openai") {
+    const sttStart = Date.now();
+    let failed = false;
+    try { transcript = await transcribe(ctx.cfg, m, input.audio); }
+    catch (err) { failed = true; log.warn({ turn: turnId, err: (err as Error).message }, "transcription failed"); }
+    timings.stt = since(sttStart);
+    timings.kit_openai = 1;
+    if (!transcript) return unheard(deps, turnId, failed, timings, t0, recordTurn);
+  }
+  if (transcript !== undefined) {
+    const answer = direct(transcript);
+    if (answer) return answer;
+  }
+
   const run = (ai: AiCall, timeoutMs: number) => withCap(runKitTurn({
-    cfg: ctx.cfg, m, ai, audio: input.audio, said: input.said ?? null, frame: input.frame, context, building: buildingNow(g, context.started),
+    cfg: ctx.cfg, m, ai, audio: input.audio, frame: input.frame, context, building: buildingNow(g, context.started),
     turns: deps.turns.history(input.assemblyId, 2), timeoutMs,
+    ...(transcript !== undefined && (ai.provider === "openai" || typed) ? { transcript } : {}),
   }), timeoutMs + 250);
-  let result: KitTurnResult | null = null, used = primary;
-  try { result = await run(primary, ctx.cfg.kitTurnMs); }
-  catch (err) { log.warn({ turn: turnId, provider: primary.provider, err: (err as Error).message }, "the Kit turn failed"); }
+  // What KIT_TURN_MS leaves after the transcription, and never past the hard cap.
+  const budget = Math.max(1000, Math.min(ctx.cfg.kitTurnMs - (timings.stt ?? 0), m.budgets.hardCap - since(t0) - 250));
+  const hearing = run(primary, budget).then((r) => ({ r }), (e: Error) => ({ e }));
+
+  // OMNI hears the clip itself. With an OpenAI key too, the clip is transcribed alongside: a command said outright is
+  // answered as soon as its words are known (a stalled OMNI call cannot hold "next" up), and a fallback reuses them.
+  let alongside: Promise<string> | null = null;
+  if (primary.provider === "omni" && ready(ctx.cfg, "openai")) {
+    const sttStart = Date.now();
+    alongside = transcribe(ctx.cfg, m, input.audio).then((words) => { timings.stt = since(sttStart); return words; }, () => "");
+    const first = await Promise.race([hearing, alongside.then((words) => ({ words }))]);
+    if ("words" in first && first.words) {
+      const answer = direct(first.words);
+      if (answer) return answer;
+    }
+  }
+
+  const heard = await hearing;
+  let result: KitTurnResult | null = "r" in heard ? heard.r : null, used = primary;
+  if ("e" in heard) log.warn({ turn: turnId, provider: primary.provider, err: heard.e.message }, "the Kit turn failed");
   const left = m.budgets.hardCap - since(t0), backup = primary.provider === "omni" ? aiFor(ctx.cfg, "turn", "openai") : null;
   if (!result && backup?.provider === "openai" && left >= 4000) {
     used = backup;
+    transcript ??= (await alongside) || undefined;                        // heard alongside: no second transcription
     try { result = await run(backup, left - 500); }
     catch (err) { log.warn({ turn: turnId, provider: backup.provider, err: (err as Error).message }, "the Kit turn failed on the fallback too"); }
   }
@@ -259,7 +325,8 @@ async function kitTurn(
 
   const known = new Set(context.twins.map((t) => t.twin_id));
   const said = { highlight_twins: kit.objects.filter((id) => known.has(id)), confidence: kit.confidence };
-  const fastInput = { plan: g.plan, state: g.state, selectedPartId: input.context.selected_part_id, recentEvents: g.recentEvents, mode: "build" as const };
+  const named = byName(kit.heard);
+  if (named) return start(named, kit.heard, said);
   const fast = matchFastPath(kit.heard, fastInput);
   if (fast) return respondFast(deps, input, g, fast, kit.heard, turnId, timings, t0, recordTurn, log, said);
 
@@ -271,23 +338,18 @@ async function kitTurn(
     case "command": {
       const command = matchFastPath(decision.phrase, fastInput);
       if (command) return respondFast(deps, input, g, command, kit.heard, turnId, timings, t0, recordTurn, log, said);
-      return quick(deps, turnId, kit.heard, kit.answer.trim() || "There's no step to do that to yet.", null, timings, t0, recordTurn, true, said);
+      // Not the model's answer: it says the command happened ("Marked it done!"), and nothing did.
+      return quick(deps, turnId, kit.heard, "There's no step to do that to yet.", null, timings, t0, recordTurn, true, said);
     }
-    case "scan":
-      build.expectScan(decision.wish);
-      return quick(deps, turnId, kit.heard, decision.text, { type: "start_scan" }, timings, t0, recordTurn, false, said);
+    case "scan": {
+      const taken = build.expectScan(decision.wish, decision.change);       // a scan being read takes it: no second scan
+      return quick(deps, turnId, kit.heard, decision.text, taken ? null : { type: "start_scan" }, timings, t0, recordTurn, false, said);
+    }
     case "rethink":
-      await build.rethink(decision.wish);
+      await build.rethink(decision.wish, decision.change);
       return quick(deps, turnId, kit.heard, decision.text, null, timings, t0, recordTurn, false, said);
     case "start":
-      try {
-        await build.startIdea(decision.ideaId);
-        return quick(deps, turnId, kit.heard, `Building the ${decision.title.toLowerCase()}. Watch the pieces.`, null, timings, t0, recordTurn, false, said);
-      } catch (err) {
-        // The idea was picked but its run could not be made (a full disk, say). In front of judges a reply beats an error.
-        log.warn({ turn: turnId, idea: decision.ideaId, err: (err as Error).message }, "could not start the picked build idea");
-        return quick(deps, turnId, kit.heard, "I couldn't start that build. Try again.", null, timings, t0, recordTurn, true, said);
-      }
+      return start({ idea_id: decision.ideaId, title: decision.title }, kit.heard, said);
   }
 }
 

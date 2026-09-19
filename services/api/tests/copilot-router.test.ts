@@ -23,12 +23,10 @@ describe("routeTurn", () => {
     expect(await routeTurn(cfg, m, input, on("openai", vi.fn(async () => ({ flow: "dance", confidence: 1 }))))).toBeNull();
     expect(await routeTurn(cfg, m, input, on("openai", vi.fn(async () => ({ flow: "modify_design", confidence: 0.9 }))))).toBeNull();
   });
-  it("asks OpenAI's small router model, or OMNI's model with OMNI's budget, and tells it the mode and what was said", async () => {
+  it("asks OpenAI's small router model within its budget, and tells it the mode and what was said", async () => {
     const call = vi.fn(async (_cfg: unknown, _req: unknown) => ({ flow: "question", confidence: 0.9 }));
     await routeTurn(cfg, m, { transcript: "make me a birdhouse", mode: "overlay" }, on("openai", call));
     expect(call.mock.calls[0]![1]).toMatchObject({ name: "route", model: "small-router", timeoutMs: 50, text: 'MODE: overlay\nSAID: "make me a birdhouse"' });
-    await routeTurn({ ...cfg, omniRouteMs: 1500 }, m, input, on("omni", call));
-    expect(call.mock.calls[1]![1]).toMatchObject({ model: "turn-model", timeoutMs: 1500 });
   });
   it("calls nothing when no provider has a key", async () => expect(await routeTurn(cfg, m, input, null)).toBeNull());
 });

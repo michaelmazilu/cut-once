@@ -22,8 +22,8 @@ export interface Config {
   omniKey: string; omniBaseUrl: string; omniModel: string; omniIdeasModel: string;
   /** How a voice clip is sent: a data URL (Alibaba's examples) or bare base64 (OpenAI's shape). `pnpm omni:probe` says which works. */
   omniAudio: "dataurl" | "base64";
-  /** The spoken turn's model budget; the build designs' live deadline before the rehearsal cache; the router's budget on OMNI. */
-  kitTurnMs: number; buildLiveMs: number; omniRouteMs: number;
+  /** The spoken turn's model budget; the build designs' live deadline before the rehearsal cache. */
+  kitTurnMs: number; buildLiveMs: number;
 }
 
 export type AiProvider = "omni" | "openai";
@@ -58,7 +58,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     omniKey: env.OMNI_API_KEY ?? "", omniBaseUrl: (env.OMNI_BASE_URL ?? "").replace(/\/$/, ""),
     omniModel: env.OMNI_MODEL || "qwen3.5-omni-flash", omniIdeasModel: env.OMNI_IDEAS_MODEL ?? "",
     omniAudio: env.OMNI_AUDIO === "base64" ? "base64" : "dataurl",
-    kitTurnMs: ms(env.KIT_TURN_MS, 6000), buildLiveMs: ms(env.BUILD_LIVE_MS, 8000), omniRouteMs: ms(env.OMNI_ROUTE_MS, 1500),
+    kitTurnMs: ms(env.KIT_TURN_MS, 6000), buildLiveMs: ms(env.BUILD_LIVE_MS, 8000),
     ...overrides,
   };
   if (!env.API_TOKEN && !overrides.apiToken && env.NODE_ENV === "production") throw new Error("API_TOKEN must be set in production");

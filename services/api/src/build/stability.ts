@@ -29,7 +29,8 @@ export const SUPPORT_SPAN = 0.5;
  * Taped pieces: tape makes them one rigid body, so the span rule does not apply inside it, but the body as a whole
  * must still stand. Its weight must land inside what holds it up by the usual margin, and it must lean at least
  * TIP_MIN_DEG before its weight passes that edge: a tall, narrow taped stack falls at a nudge like an untaped one.
- * Tape holds pieces in place, it does not carry them: at most TAPE_MAX_KG may rest on other taped pieces.
+ * Tape holds pieces in place, it does not carry them: at most TAPE_MAX_KG may hang on it (the pieces resting on other
+ * taped pieces, and whatever rests on those). A joint that is not taped is a loose joint, whatever is taped above it.
  */
 export const TIP_MIN_DEG = 7;
 export const TAPE_MAX_KG = 1.5;
@@ -110,18 +111,27 @@ export function checkStability(placed: Placed[], twins: Map<string, Twin>, vocab
     }
     const lean = (Math.atan2(got, Math.max(1e-6, sy / m - base)) * 180) / Math.PI;
     if (lean < TIP_MIN_DEG) return { ok: false, reason: `the taped ${names} would tip over at a ${lean.toFixed(0)}° lean; a taped stack needs ${TIP_MIN_DEG}°` };
+    // The tape holds the pieces resting on other taped pieces, and everything resting on those from outside the body.
     const held = body.filter((p) => p.rests_on.some((r) => ids.has(r)));
-    const heldKg = held.reduce((sum, p) => sum + mass(p), 0);
+    let resting = 0;
+    for (const p of held) {
+      if (payload && p === top) resting += payload.kg;
+      for (const q of above.get(p.twin_id) ?? []) if (!ids.has(q.twin_id)) resting += carriedBy(q) / q.rests_on.length;
+    }
+    const heldKg = held.reduce((sum, p) => sum + mass(p), 0) + resting;
     if (heldKg > TAPE_MAX_KG) {
       const what = held.length === 1 ? held[0]!.label : plural(held.map((p) => p.label));
-      return { ok: false, reason: `tape cannot hold the ${what} in place: ${held.length === 1 ? "it weighs" : "they weigh"} ${heldKg.toFixed(1)} kg, over ${TAPE_MAX_KG} kg` };
+      return { ok: false, reason: `tape cannot hold the ${what} in place: ${held.length === 1 ? "it weighs" : "they weigh"} ${heldKg.toFixed(1)} kg`
+        + `${resting > 0 ? ` with what rests on ${held.length === 1 ? "it" : "them"}` : ""}, over ${TAPE_MAX_KG} kg` };
     }
     return { ok: true };
   }
 
   const taped = (p: Placed) => (bodies.get(find(p.twin_id))?.length ?? 1) > 1;
   for (const p of placed) {
-    if (taped(p)) continue;                       // checked as part of its rigid body above
+    // A taped piece on the table or on a piece it is taped to is checked with its rigid body above. One resting only on
+    // pieces outside its body sits on a loose joint: tape above it does not stop it sliding off, so it is checked here.
+    if (taped(p) && (p.rests_on.length === 0 || p.rests_on.some((r) => find(r) === find(p.twin_id)))) continue;
     const t = twins.get(p.twin_id)!;
     let m = mass(p) + (payload && p === top ? payload.kg : 0);
     let sx = m * p.position[0], sz = m * p.position[2];

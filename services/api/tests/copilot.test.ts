@@ -91,13 +91,28 @@ describe("fast path", () => {
   });
 
   it("'build me a birdhouse' and its cousins scan at once and carry the wish, with no model", () => {
-    const wish = (said: string) => matchFastPath(said, input())?.wish;
+    const wish = (said: string, mode?: "build" | "overlay") => matchFastPath(said, input({ mode }))?.wish;
     expect(wish("Can you build me a birdhouse?")).toBe("a birdhouse");
-    expect(wish("Hey Kit, make me something crazier.")).toBe("something crazier");
+    expect(wish("Hey Kit, make me a robot.")).toBe("a robot");
     expect(wish("I want to build a stand for my phone")).toBe("a stand for my phone");
-    expect(wish("Let's make a robot")).toBe("a robot");
+    expect(wish("Let's make a robot", "build")).toBe("a robot");
     expect(wish("could we build a tower with these")).toBe("a tower");
-    expect(matchFastPath("Can you build me a birdhouse?", input())?.answer_text).toBe("Let me see how to make a birdhouse from what's here.");
+    expect(matchFastPath("Can you build me a birdhouse?", input())).toMatchObject({ answer_text: "Let me see how to make a birdhouse from what's here.", change: false });
+  });
+
+  it("outside build mode, 'make a …' is an ordinary request (a list, a note, a change), not a wish; in build mode it is one", () => {
+    for (const said of ["Can you make a list of the parts in this step?", "Make a note that the leg is loose", "Can I make a change to the beam?", "please make a copy of this drawing", "let's make a note of that"]) {
+      expect([said, matchFastPath(said, input({ mode: "overlay" }))]).toEqual([said, null]);
+    }
+    expect(matchFastPath("make a robot", input({ mode: "build" }))?.wish).toBe("a robot");
+    expect(matchFastPath("build a robot", input({ mode: "overlay" }))?.wish).toBe("a robot");
+  });
+
+  it("'build me something' is a plain ask; 'something crazier' or 'something else' changes the designs on show", () => {
+    expect(matchFastPath("build me something", input())).toMatchObject({ action: { type: "start_scan" }, wish: null, answer_text: "Let me see what you've got." });
+    expect(matchFastPath("Hey Kit, make me something crazier.", input())).toMatchObject({ wish: "something crazier", change: true });
+    expect(matchFastPath("build me something else", input())).toMatchObject({ wish: "something else", change: true });
+    expect(matchFastPath("build me something for my phone", input())).toMatchObject({ wish: "something for my phone", change: false });
   });
 
   it("leaves everything else to the model: changes, questions, parts and very long wishes", () => {

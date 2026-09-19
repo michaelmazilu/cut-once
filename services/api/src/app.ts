@@ -26,9 +26,16 @@ export interface Hooks {
   build?: {
     /** Is there a design on show that could be changed? (Objects are known and no build is under way.) */
     canRethink: () => boolean;
-    rethink: (request: string) => Promise<boolean>;
-    /** The copilot is about to start a scan: what the builder asked for goes with it (null: a plain ask, forget the last wish). */
-    expectScan: (wish: string | null) => void;
+    /**
+     * change: the request changes the designs on show ("something crazier"), so they are not offered again. Otherwise
+     * it is a new ask, and anything may be offered, even a design shown before.
+     */
+    rethink: (request: string, change: boolean) => Promise<boolean>;
+    /**
+     * The copilot is about to start a scan: what the builder asked for goes with it (null: a plain ask, forget the last
+     * wish). True when a scan being read or named took it instead: then no scan is asked for.
+     */
+    expectScan: (wish: string | null, change: boolean) => boolean;
     /** What Kit is told about build mode on every turn (build/session.ts). */
     kitContext: () => KitBuildContext;
     /** Start a design on show as a normal run, as the trigger or the Director does. */

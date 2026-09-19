@@ -5,7 +5,7 @@ import type { Ctx, Plugin } from "../app.js";
 import { ApiError, badRequest } from "../errors.js";
 import { aiFor } from "../ai.js";
 import { loadRules, loadVocab, standardShape } from "./data.js";
-import { BuildSessions } from "./session.js";
+import { askedFor, BuildSessions } from "./session.js";
 
 /** Build mode (the Lego Movie). Which provider and model name objects and design: ai.ts (KIT_AI and friends). */
 /** A JPEG starts FF D8 FF ("/9j/" in base64). Checked before anything is saved: the labeller cannot read anything else. */
@@ -16,7 +16,7 @@ export const buildRoutes: Plugin = (app: FastifyInstance, ctx: Ctx) => {
   const rules = loadRules(ctx.cfg.repoRoot, vocab);
   const sessions = new BuildSessions(ctx, { vocab, rules, log: app.log, ai: (job) => aiFor(ctx.cfg, job) });
   ctx.hooks.build = {
-    canRethink: () => sessions.canRethink(), rethink: (request) => sessions.rethink(request), expectScan: (wish) => sessions.expectScan(wish),
+    canRethink: () => sessions.canRethink(), rethink: (request, change) => sessions.rethink(request, change), expectScan: (wish, change) => sessions.expectScan(wish, change),
     kitContext: () => sessions.kitContext(), startIdea: (ideaId) => sessions.startIdea(ideaId), idle: () => sessions.idle(),
   };
 
@@ -39,12 +39,13 @@ export const buildRoutes: Plugin = (app: FastifyInstance, ctx: Ctx) => {
   app.post("/v1/build/sessions", async () => ({ session_id: sessions.newSession().session_id }));
   app.get("/v1/build/sessions/current", async () => {
     const s = sessions.current();
-    return { session: s ? { session_id: s.session_id, created_at: s.created_at, scans: s.scans } : null, wish: s?.wish ?? null, surfaces: s?.surfaces ?? [], twins: s?.twins ?? [], ideas: s?.ideas ?? [] };
+    return { session: s ? { session_id: s.session_id, created_at: s.created_at, scans: s.scans } : null, wish: s ? askedFor(s) : null, surfaces: s?.surfaces ?? [], twins: s?.twins ?? [], ideas: s?.ideas ?? [] };
   });
   app.post("/v1/build/ideas/rethink", async (req) => {
     const body = z.object({ request: z.string().min(1).max(300) }).safeParse(req.body);
     if (!body.success) throw badRequest("body must be { request }");
-    return { accepted: await sessions.rethink(body.data.request) };
+    // The Director asks for other designs: a change, so the ones on show are not offered again.
+    return { accepted: await sessions.rethink(body.data.request, true) };
   });
   app.post<{ Params: { idea_id: string } }>("/v1/build/ideas/:idea_id/start", async (req) => sessions.startIdea(req.params.idea_id));
   app.post("/v1/build/objects", async (req) => {
