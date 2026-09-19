@@ -50,7 +50,7 @@ const SYSTEM = [
   "You are Kit, the Kitbash co-pilot. You design small things a person can build right now from the real objects in front of them, like a Master Builder in the Lego Movie.",
   "You get an inventory of objects with measured sizes, and a photo. The objects can be anything. Return exactly 4 designs, each as bottom-up placement steps:",
   "- place: an object id from the inventory (each at most once).",
-  "- orientation: upright (tallest side up), flat (thinnest side up) or on_side (middle side up). Cans, bottles, mugs and other cylinders can only be upright. An object named other (a bowl, a kettle) stays the way it stands now: its orientation is the one its measured height gives.",
+  "- orientation: upright (tallest side up), flat (thinnest side up) or on_side (middle side up). Cans, bottles, mugs and other cylinders can only be upright. An object marked as standing as found may be laid down (an orientation no taller than it is now) but never stood up on a smaller face.",
   "- on: [] for the table, or ids already placed that it rests on. Supports must be able to hold weight and be the SAME height: use identical objects as supports.",
   "- at_cm: {x, z} on the table (x to the right, z toward the viewer, origin the centre of the build), or null.",
   "- next_to, side (left/right/front/back), gap_cm: or put it beside an object already on the table.",
@@ -63,7 +63,9 @@ const SYSTEM = [
 
 export function inventoryText(twins: Twin[], surfaces: Surface[]): string {
   const s = surfaces.map((x) => `${x.surface_id} ${x.kind} at ${Math.round(x.y * 100)} cm`).join("; ");
-  const lines = twins.map((t) => `${t.twin_id} ${t.label}: ${describeShape(t.shape)}; ${t.material}; ${t.load_bearing ? "can hold weight" : "cannot hold weight"}${t.sits_on ? `; on ${t.sits_on}` : ""}`);
+  // "as found": only this thing's size was measured, so its shape is a guess (a bowl, a kettle). It can be laid
+  // down but not stood up on a smaller face. Saying so here is what keeps the first round of designs buildable.
+  const lines = twins.map((t) => `${t.twin_id} ${t.label}: ${describeShape(t.shape)}; ${t.material}; ${t.load_bearing ? "can hold weight" : "cannot hold weight"}${t.sits_on ? `; on ${t.sits_on}` : ""}${t.name === "other" ? "; stands as found (may be laid down, never stood up)" : ""}`);
   return `Surfaces: ${s || "none"}.\nObjects:\n${lines.join("\n")}\nTOOLS: ${hasTape(twins) ? "tape (a roll is on the table)" : "none"}`;
 }
 

@@ -58,7 +58,9 @@ export async function buildApp(cfg: Config, plugins: Plugin[] = []): Promise<Fas
   app.decorate("ctx", ctx);
 
   await app.register(cors, { origin: true });
-  await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024, files: 4 } });
+  // Fields are bounded too: a question is a sentence and a context is a packet, and both are read before anything
+  // validates them.
+  await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024, files: 4, fields: 12, fieldSize: 256 * 1024 } });
   await app.register(websocket);
   registerAuth(app, cfg);
 

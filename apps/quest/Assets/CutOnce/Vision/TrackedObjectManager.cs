@@ -31,8 +31,8 @@ namespace CutOnce.Vision
     /// </summary>
     public class TrackedObjectManager : MonoBehaviour
     {
-        [Tooltip("Same class within this many metres is treated as the same physical object.")]
-        public float associationDistance = 0.3f;
+        [Tooltip("Same class within this many metres is treated as the same physical object. Wide enough for depth jitter across a room: a miss makes a DUPLICATE, which is worse than a slightly greedy match (a jump is rejected separately).")]
+        public float associationDistance = 0.75f;
 
         [Tooltip("Detections needed before an object becomes visible. Suppresses one-frame false positives.")]
         public int hitsBeforeVisible = 3;

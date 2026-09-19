@@ -30,16 +30,9 @@ namespace CutOnce.Vision
             if (Instance != null) return Instance;
             if (Object.FindFirstObjectByType<RoomScanner>() != null) return null;
 
-            // Stand down if the other scanner implementation is in the build. MRUK hands out ONE
-            // PassthroughCameraAccess per eye, so two auto-starting scanners would fight over the
-            // camera and both lose. Whichever is canonical wins; this one simply goes dormant.
-            foreach (var mb in Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
-            {
-                var ns = mb.GetType().Namespace;
-                if (ns == null || !ns.StartsWith("CutOnce.Scanner")) continue;
-                Debug.Log($"[Vision] {mb.GetType().Name} is present; RoomScanner standing down to leave it the camera.");
-                return null;
-            }
+            // MRUK hands out ONE PassthroughCameraAccess per camera position, and the copilot reads the same camera
+            // for its questions. It is shared, not contested: VisionCamera reuses whatever is in the scene, and
+            // CutOnceApp.AddCameraSource reuses whatever we made. Nothing here has to stand down.
 
             var model = Resources.Load<Unity.InferenceEngine.ModelAsset>(ModelResource);
             var labels = Resources.Load<TextAsset>(LabelsResource);
@@ -70,11 +63,9 @@ namespace CutOnce.Vision
             return scanner;
         }
 
-        /// <summary>
-        /// The one-shot check in Install() is not enough: the order in which
-        /// RuntimeInitializeOnLoadMethod hooks run across classes is undefined, so the rival
-        /// scanner may not exist yet when we look. Keep looking for a few frames, and if one turns
-        /// up, delete ourselves — only one pipeline may ever own PassthroughCameraAccess.
+/// <summary>
+        /// RoomSense's gaze inspector may not exist yet when Install() runs — the order in which
+        /// RuntimeInitializeOnLoadMethod hooks run across classes is undefined — so keep looking for a few frames.
         /// </summary>
         private class RivalWatch : MonoBehaviour
         {
@@ -89,16 +80,6 @@ namespace CutOnce.Vision
                     foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
                     {
                         var type = mb.GetType();
-                        var ns = type.Namespace;
-
-                        // The other scanner implementation: stand down entirely so it keeps the camera.
-                        if (ns != null && ns.StartsWith("CutOnce.Scanner"))
-                        {
-                            Debug.Log($"[Vision] {type.Name} started too; RoomScanner is shutting down so it keeps sole ownership of the camera.");
-                            Instance = null;
-                            Destroy(gameObject);
-                            yield break;
-                        }
 
                         // RoomSense's gaze inspector names things from MRUK labels and bounding-box
                         // size. That is a guess, not recognition, and two naming systems in one
@@ -127,7 +108,13 @@ namespace CutOnce.Vision
             private IEnumerator Start()
             {
 #if UNITY_ANDROID && !UNITY_EDITOR
-                OVRPermissionsRequester.Request(new[]
+                // The app asks for camera, microphone and spatial data itself at start-up. Two requests racing can
+                // come back "dismissed" for whoever asked second, which reads as a refusal nobody made; when it is
+                // here we only wait for the answer it is already getting.
+                var appAsks = false;
+                foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                    if (mb.GetType().FullName == "CutOnce.Device.CutOnceApp") { appAsks = true; break; }
+                if (!appAsks) OVRPermissionsRequester.Request(new[]
                 {
                     OVRPermissionsRequester.Permission.Scene,
                     OVRPermissionsRequester.Permission.PassthroughCameraAccess,

@@ -347,7 +347,10 @@ namespace CutOnce.Device
         {
             if (Application.isEditor) return go.AddComponent<FixtureFrameSource>();
             var frames = go.AddComponent<PcaFrameSource>();
-            frames.cameraAccess = go.AddComponent<Meta.XR.PassthroughCameraAccess>();
+            // MRUK allows ONE PassthroughCameraAccess per camera position: a second one logs an error, disables itself
+            // and leaves whoever asked second blind for the session. The room scanner starts before us (AfterSceneLoad),
+            // so share whatever is already there. One camera, both readers: its texture for the scanner, its pixels for us.
+            frames.cameraAccess = FindAnyObjectByType<Meta.XR.PassthroughCameraAccess>() ?? go.AddComponent<Meta.XR.PassthroughCameraAccess>();
             return frames;
         }
     }

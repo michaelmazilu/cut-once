@@ -39,8 +39,13 @@ namespace CutOnce.Vision
         [Tooltip("Abandon a frame whose readback never lands, rather than spinning the frame loop forever.")]
         public float readbackTimeoutSeconds = 8f;
 
-        [Tooltip("Upper bound on inference rate. The model takes as long as it takes; this only stops us queueing faster than that.")]
-        public float maxInferencesPerSecond = 12f;
+        [Tooltip("Upper bound on inference rate. The model takes as long as it takes; this only stops us queueing faster than that. A few a second keep the labels live without cooking an XR2.")]
+        public float maxInferencesPerSecond = 3f;
+
+        [Tooltip("Only for a model whose head already gives corners (x1,y1,x2,y2). YOLO gives centre+size.")]
+        public bool cornerBoxes;
+
+        private bool _loggedRawBox;
 
         /// <summary>Detections, plus the camera pose and input size they were computed against.</summary>
         public event Action<List<DetectedObject>, Pose, Vector2> OnDetections;
@@ -199,7 +204,13 @@ namespace CutOnce.Vision
             try
             {
                 LastRawDetections = scores.shape.length;
-                NonMaxSuppression(_nmsResults, boxes, classIds, scores, iouThreshold, scoreThreshold);
+                if (!_loggedRawBox && scores.shape.length > 0)
+                {
+                    _loggedRawBox = true;                                    // one line, so the log settles the layout on a real device
+                    Debug.Log($"[Vision] first raw box [{boxes[0, 0]:0.0}, {boxes[0, 1]:0.0}, {boxes[0, 2]:0.0}, {boxes[0, 3]:0.0}] " +
+                              $"read as {(cornerBoxes ? "corners (x1,y1,x2,y2)" : "centre+size (cx,cy,w,h)")}");
+                }
+                NonMaxSuppression(_nmsResults, boxes, classIds, scores, iouThreshold, scoreThreshold, cornerBoxes);
 
                 _detections.Clear();
                 foreach (var (classId, box, score) in _nmsResults)
@@ -232,7 +243,7 @@ namespace CutOnce.Vision
             try
             {
                 if (_input == null) _input = new Tensor<float>(new TensorShape(1, 3, _inputSize.x, _inputSize.y));
-                var transform = new TextureTransform().SetDimensions(texture.width, texture.height, 3);
+                var transform = new TextureTransform().SetDimensions(_inputSize.x, _inputSize.y, 3);   // the tensor's size: the camera frame is not square, the model's input is
                 TextureConverter.ToTensor(texture, _input, transform);
                 _worker.Schedule(_input);
                 return true;
@@ -274,7 +285,7 @@ namespace CutOnce.Vision
 
         /// <summary>Ported from Meta's sample: score filter, sort, suppress by IoU regardless of class.</summary>
         private static void NonMaxSuppression(List<(int classId, Vector4 box, float score)> results, Tensor<float> boxes,
-            Tensor<int> classIds, Tensor<float> scores, float iouThreshold, float scoreThreshold)
+            Tensor<int> classIds, Tensor<float> scores, float iouThreshold, float scoreThreshold, bool cornerBoxes)
         {
             results.Clear();
             NativeArray<float>.ReadOnly scoreArray = scores.AsReadOnlyNativeArray();
@@ -300,7 +311,15 @@ namespace CutOnce.Vision
                 }
             }
 
-            Vector4 Box(int i) => new Vector4(boxes[i, 0], boxes[i, 1], boxes[i, 2], boxes[i, 3]);
+            // The head gives each box as centre-width-height — Ultralytics' own layout, and what Meta's sample reads
+            // out of this very model. Everything downstream (IoU here, the Rect below) is corners, so it is converted
+            // once, here. Read as corners, a box 100 px wide at x = 320 becomes 220 px WIDE OF ZERO: the rectangle
+            // inverts, its centre lands nowhere near the object, and IoU stops suppressing duplicates.
+            Vector4 Box(int i)
+            {
+                float a = boxes[i, 0], b = boxes[i, 1], c = boxes[i, 2], d = boxes[i, 3];
+                return cornerBoxes ? new Vector4(a, b, c, d) : new Vector4(a - c * 0.5f, b - d * 0.5f, a + c * 0.5f, b + d * 0.5f);
+            }
         }
 
         private static float IoU(Vector4 a, Vector4 b)
@@ -318,6 +337,7 @@ namespace CutOnce.Vision
 
         private void OnDestroy()
         {
+            StopAllCoroutines();                                             // a readback still in flight must not land on a disposed worker
             _worker?.Dispose();
             _input?.Dispose();
         }

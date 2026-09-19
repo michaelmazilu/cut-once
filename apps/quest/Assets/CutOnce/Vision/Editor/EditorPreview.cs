@@ -49,6 +49,9 @@ public static class EditorPreview
     {
         // Skip in batch mode so it cannot perturb the verification suite; tests call ForceStart().
         if (Application.isBatchMode) return;
+        // Only in the scene it was built for. It loads a mock room over MRUK and runs the model every couple of
+        // seconds, which is not what someone pressing Play on Main.unity (or a PlayMode test) asked for.
+        if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "ObjectScanner") return;
         ForceStart();
     }
 

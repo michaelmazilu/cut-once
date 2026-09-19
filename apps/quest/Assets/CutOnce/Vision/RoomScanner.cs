@@ -117,8 +117,28 @@ namespace CutOnce.Vision
             Tracker.EndFrame(_observed);
         }
 
+        /// <summary>
+        /// Off while build mode has the room: its own scan names and measures the objects, and two sets of names over
+        /// one table read as noise. Stopping the detector also gives the scan, the designs and the fly-in the frame
+        /// time and the headroom (an XR2 throttles when it gets hot). Everything tracked is kept, so coming back is free.
+        /// </summary>
+        public bool Paused
+        {
+            get => _paused;
+            set
+            {
+                if (_paused == value) return;
+                _paused = value;
+                if (Detector != null) Detector.enabled = !value;
+                if (value && Visualizer != null && Tracker != null) foreach (var o in Tracker.Objects) Visualizer.Hide(o);
+            }
+        }
+
+        private bool _paused;
+
         private void Update()
         {
+            if (_paused) return;
             foreach (var o in Tracker.Prune(_removed)) Visualizer.Hide(o);
             foreach (var o in Tracker.Objects)
             {

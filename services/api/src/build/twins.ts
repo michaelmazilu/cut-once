@@ -31,6 +31,7 @@ export const OPTIONS = {
   minObjectHeight: 0.015,
   minObjectHeightPerMetre: 0.012, // taller than the noise at that range, or it is a bump in the depth map
   maxObjectSize: 1.5,             // bigger than this is furniture or a wall
+  restingGap: 0.25,               // how far above its surface an object's lowest seen point may be (the rest is hidden behind something)
 };
 export type Options = typeof OPTIONS;
 
@@ -82,13 +83,17 @@ function view(cloud: Cloud, opts: Options) {
   // away. A 1 cm slice of a backsplash is at a table's height as much as the table is; this keeps it from counting as
   // one. Two rows, not one, so depth noise (which moves a wall's points along the ray, not up it) cannot pass for a slope.
   const steep = new Uint8Array(cols * rows);
+  const risesTo = (i: number, j: number) => Math.abs(y(i) - y(j)) > Math.hypot(x(i) - x(j), z(i) - z(j));
   for (let i = 0; i < cols * rows; i++) {
     if (!ok(i)) continue;
     let checked = 0, rising = 0;
-    for (const j of [i - 2 * cols, i + 2 * cols]) {
-      if (j < 0 || j >= cols * rows || !ok(j)) continue;
+    for (const step of [-2, 2]) {
+      // A real depth sensor returns nothing on a plain painted wall, which is exactly where this mask is needed, so
+      // when the cell two rows away is missing, ask the one next door rather than letting the wall through unmasked.
+      const j = [i + step * cols, i + (step / 2) * cols].find((k) => k >= 0 && k < cols * rows && ok(k));
+      if (j === undefined) continue;
       checked++;
-      if (Math.abs(y(i) - y(j)) > Math.hypot(x(i) - x(j), z(i) - z(j))) rising++;
+      if (risesTo(i, j)) rising++;
     }
     steep[i] = checked > 0 && rising === checked ? 1 : 0;
   }
@@ -148,7 +153,7 @@ function findLevels(v: View, opts: Options): number[] {
     if (taken.some((t) => Math.abs(t - b) <= apart)) continue;
     taken.push(b);
     let sum = 0, count = 0;                                          // the level itself: the mean height of the points around the bin
-    for (let i = 0; i < v.n; i++) if (v.ok(i) && Math.abs(v.y(i) - b * 0.01) <= 0.015) { sum += v.y(i); count++; }
+    for (let i = 0; i < v.n; i++) if (v.ok(i) && !v.steep[i] && Math.abs(v.y(i) - b * 0.01) <= 0.015) { sum += v.y(i); count++; }
     levels.push(sum / count);
   }
   return levels;
@@ -336,6 +341,9 @@ function fit(v: View, cloud: Cloud, body: Body, surfaces: Surface[], scanId: str
   const cx = sx / cells.length, cz = sz / cells.length;
   const base = surfaces.filter((s) => s.y <= body.minY + 0.03 && standsOn(s, cx, cz)).sort((a, b) => b.y - a.y)[0];
   if (!base) return null;                                            // floating: a wall, a person, a lamp
+  // Something ON a table reaches down to it. Part of it may be hidden behind something in front, but a patch that
+  // starts well above the top — a piece of the wall behind, seen over the table's far edge — is not standing on it.
+  if (body.minY - base.y > opts.restingGap) return null;
   const ys = cells.map(v.y).sort((a, b) => a - b);
   const top = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.95))]!, height = top - base.y;
   const away = Math.hypot(cx - cloud.cam[0], base.y - cloud.cam[1], cz - cloud.cam[2]);

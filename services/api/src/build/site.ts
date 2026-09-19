@@ -56,7 +56,11 @@ export function chooseSite(surface: Surface, pile: Box2, design: { w: number; d:
     if (!fits(c, th)) continue;
     const area = covered(c, th);
     if (area === 0 && (!best || d < best.d)) best = { c, th, d };
-    if (!least || area < least.area - 1e-9 || (Math.abs(area - least.area) <= 1e-9 && d < least.d)) least = { c, th, d, area };
+    // Covering a little less is not worth standing the design across the room: `covered` measures the design's box
+    // along the room's axes, which swells by up to 40% as the turn goes diagonal, so near-equal areas are a tie and
+    // the nearer spot wins.
+    const tie = 0.25 * design.w * design.d;
+    if (!least || area < least.area - tie || (area < least.area + tie && d < least.d)) least = { c, th, d, area };
   }
   if (best) return site(best.c, best.th);
   if (least) return site(least.c, least.th);

@@ -42,13 +42,14 @@ export function oriented(t: Twin, o: Orientation): TwinShape | string {
     return o === "upright" ? { type: "cylinder", axis: "y", diameter: t.shape.diameter, length: t.shape.length } : `the ${t.label} would roll on its side; stand it upright`;
   }
   const [d0, d1, d2] = [...t.shape.size].sort((a, b) => b - a) as [number, number, number];
-  // Something not in the vocabulary (a bowl, a kettle) is only measured as a box: it rests the way it stands now, and
-  // turning it would put a bowl on its rim.
+  // Something not in the vocabulary is only measured as a box, so its real shape is a guess: a bowl, a kettle, a
+  // plant. Such a thing may be LAID DOWN (a cereal box flat on the table) but never stood UP on a smaller face,
+  // which is what puts a bowl on its rim. Anything in the vocabulary has a known shape and turns freely.
   if (t.name === "other") {
     const h = t.shape.size[1], up = { upright: d0, on_side: d1, flat: d2 }[o];
-    if (Math.abs(up - h) > 0.001) {
-      const now = Math.abs(h - d2) <= 0.001 ? "flat" : Math.abs(h - d0) <= 0.001 ? "upright" : "on side";
-      return `the ${t.label} only rests the way it stands now; keep it ${now}`;
+    if (up > h + 0.001) {
+      const now: Orientation = Math.abs(h - d2) <= 0.001 ? "flat" : Math.abs(h - d0) <= 0.001 ? "upright" : "on_side";
+      return `the ${t.label} can be laid down but not stood up, because only its size was measured; keep it ${now}`;
     }
   }
   if (o === "flat") return { type: "box", size: [d0, d2, d1] };

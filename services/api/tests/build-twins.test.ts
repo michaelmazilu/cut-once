@@ -19,8 +19,9 @@ describe("surfaces", () => {
 });
 
 describe("a wall right behind the table (a kitchen counter's backsplash)", () => {
-  // Every height the table's objects reach, the wall reaches too: a 1 cm slice of it, joined to the tops and sides of
-  // the things in front, once passed for a second table 4 cm up, which cut every can in half and hid the pizza box.
+  // Every height the table's objects reach, the wall reaches too. A slice of it used to be taken for part of the table
+  // (in a real kitchen scan, for a second table 4 cm up, which cut every can in half and hid the pizza box); here it
+  // welds onto the table's own outline and stretches it from 1.2 m to 3.2 m — the same fault, seen through the table.
   const WALL: Prim = { kind: "box", min: [-2, 0, 1.02], max: [2, 2.5, 1.05] };
   const scene = [FLOOR, TABLE, WALL, box(-0.25, 0.75, 0.35, 0.04, 0.35), can(0.1, 0.5), can(0.22, 0.5), can(0.16, 0.66), can(0.3, 0.9)];
 
