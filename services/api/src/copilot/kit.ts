@@ -160,7 +160,7 @@ async function smaller(frame: Buffer): Promise<Buffer> {
 }
 
 export interface KitTurnInput {
-  cfg: Config; m: CopilotModels; ai: AiCall; audio: Buffer; frame: Buffer | null;
+  cfg: Config; m: CopilotModels; ai: AiCall; audio: Buffer; said?: string | null; frame: Buffer | null;
   context: KitBuildContext; building: KitBuilding | null; turns: KitTurnHistory[]; timeoutMs: number;
 }
 export interface KitTurnResult { kit: KitTurn; sttMs: number | null; modelMs: number }
@@ -172,8 +172,8 @@ export interface KitTurnResult { kit: KitTurn; sttMs: number | null; modelMs: nu
 export async function runKitTurn(input: KitTurnInput): Promise<KitTurnResult> {
   const { cfg, m, ai } = input;
   const started = Date.now();
-  let said: string | null = null, sttMs: number | null = null;
-  if (ai.provider === "openai") {
+  let said: string | null = input.said ?? null, sttMs: number | null = said === null ? null : 0;
+  if (said === null && ai.provider === "openai") {
     said = await transcribe(cfg, m, input.audio);
     sttMs = Date.now() - started;
     if (!said) return { kit: { heard: "", intent: "unclear", wish: null, pick: null, answer: "", objects: [], confidence: 0 }, sttMs, modelMs: 0 };
@@ -183,7 +183,7 @@ export async function runKitTurn(input: KitTurnInput): Promise<KitTurnResult> {
   const kit = KitTurn.parse(await ai.call(cfg, {
     name: "kit_turn", model: ai.model, schema: KitTurn, system: KIT_SYSTEM, text: kitContextText(input.context, input.building, said, input.turns),
     timeoutMs: Math.max(1000, input.timeoutMs - (modelStart - started)), images: photo ? [{ data: photo, mime: "image/jpeg" as const }] : [],
-    ...(ai.provider === "omni" ? { audio: { data: input.audio, format: "wav" as const } } : {}),
+    ...(ai.provider === "omni" && said === null ? { audio: { data: input.audio, format: "wav" as const } } : {}),
   }));
   return { kit: said === null ? kit : { ...kit, heard: said }, sttMs, modelMs: Date.now() - modelStart };
 }

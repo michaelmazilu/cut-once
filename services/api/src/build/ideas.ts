@@ -42,13 +42,13 @@ const Out = z.object({ ideas: z.array(S.IdeaDraft) });
 const OutStrict = z.object({ ideas: z.array(Strict.IdeaDraft) });
 
 /** Part of every cache key: a change to SYSTEM below must retire the designs cached under the old words. */
-export const PROMPT_VERSION = "kit-3";
+export const PROMPT_VERSION = "kit-4";
 
 const SYSTEM = [
   "You are Kit, the Kitbash co-pilot. You design small things a person can build right now from the real objects in front of them, like a Master Builder in the Lego Movie.",
   "You get an inventory of objects with measured sizes, and a photo. The objects can be anything. Return exactly 4 designs, each as bottom-up placement steps:",
   "- place: an object id from the inventory (each at most once).",
-  "- orientation: upright (tallest side up), flat (thinnest side up) or on_side (middle side up). Cans, bottles, mugs and other cylinders can only be upright.",
+  "- orientation: upright (tallest side up), flat (thinnest side up) or on_side (middle side up). Cans, bottles, mugs and other cylinders can only be upright. An object named other (a bowl, a kettle) stays the way it stands now: its orientation is the one its measured height gives.",
   "- on: [] for the table, or ids already placed that it rests on. Supports must be able to hold weight and be the SAME height: use identical objects as supports.",
   "- at_cm: {x, z} on the table (x to the right, z toward the viewer, origin the centre of the build), or null.",
   "- next_to, side (left/right/front/back), gap_cm: or put it beside an object already on the table.",
@@ -241,10 +241,13 @@ const NUM = ["no", "a", "two", "three", "four", "five", "six", "seven", "eight",
 const list = (w: string[]) => (w.length <= 1 ? w.join("") : `${w.slice(0, -1).join(", ")} and ${w.at(-1)}`);
 
 /** "three tall cans, a pizza box and a tape roll": every named object, counted. Empty when none has a name. */
+/** "a" or "an", by the word's first sound (vowel letters, which covers every label and title we have). */
+const a = (words: string) => (/^[aeiou]/i.test(words) ? `an ${words}` : `a ${words}`);
+
 export function describeFound(twins: Twin[]): string {
   const counts = new Map<string, number>();
   for (const t of twins) if (t.name !== "unknown") counts.set(t.label, (counts.get(t.label) ?? 0) + 1);
-  return list([...counts.entries()].map(([label, n]) => (n === 1 ? `a ${label}` : `${NUM[n] ?? n} ${label}s`)));
+  return list([...counts.entries()].map(([label, n]) => (n === 1 ? a(label) : `${NUM[n] ?? n} ${label}s`)));
 }
 
 /** What the voice says when the final ideas arrive. */
@@ -252,5 +255,5 @@ export function summary(twins: Twin[], ideas: Pick<BuildIdea, "title">[]): strin
   const found = describeFound(twins);
   if (!found) return "I couldn't make out any objects. Try looking from a little closer.";
   if (!ideas.length) return `I found ${found}, but nothing I tried stands up. Add something flat to go on top, or three things the same height.`;
-  return `I found ${found}. You could build ${list(ideas.map((i) => `a ${i.title.toLowerCase()}`))}.`;
+  return `I found ${found}. You could build ${list(ideas.map((i) => a(i.title.toLowerCase())))}.`;
 }

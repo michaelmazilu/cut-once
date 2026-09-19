@@ -263,10 +263,12 @@ export const postEvent = (assemblyId: string, event: Record<string, unknown>) =>
   request<{ version: number; head: number }>("POST", `/v1/assemblies/${enc(assemblyId)}/events`, { body: event });
 
 /** One copilot question: the context packet, the recorded question and one camera frame (blueprint §10). */
-export async function askCopilot(assemblyId: string, context: CopilotContext, audio: Blob, frame: Blob): Promise<CopilotResponse> {
+/** A spoken question (`audio`), or a typed one (`question`, with `audio` null). */
+export async function askCopilot(assemblyId: string, context: CopilotContext, audio: Blob | null, frame: Blob, question?: string): Promise<CopilotResponse> {
   const form = new FormData();
   form.append("context", JSON.stringify(context));
-  form.append("audio", audio, "question.wav");
+  if (audio) form.append("audio", audio, "question.wav");
+  if (question) form.append("question", question);
   form.append("frame", frame, "frame.jpg");
   let res: Response;
   try {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
@@ -225,7 +225,8 @@ export function KitchenPage() {
     } catch (e) { setStatus({ kind: "error", text: `Scan: ${describeError(e)}` }); }
   }, []);
 
-  const ask = useCallback(async (audio: Blob) => {
+  /** A spoken question (`audio`), or a typed one (`question`). */
+  const ask = useCallback(async (audio: Blob | null, question?: string) => {
     const w = world.current, { run: r, plan: p, state: s } = live.current;
     if (!w || !r || !p || !s) return;
     setStatus({ kind: "busy", text: "Thinking…" });
@@ -234,7 +235,7 @@ export function KitchenPage() {
         currentStepId: s.current_step_id, parts: [], camera: scanCamera(w.camera), width: PHOTO_W, height: PHOTO_H }),
         mode: (session.current ? "build" : "overlay") as "build" | "overlay" };
       const photo = await w.rig.photo(w.room, w.camera);
-      const response = await askCopilot(r.assembly_id, context, audio, photo);
+      const response = await askCopilot(r.assembly_id, context, audio, photo, question);
       setAnswer(response);
       setHighlight(response.highlight_twins ?? []);
       window.setTimeout(() => setHighlight([]), 6000);
@@ -271,6 +272,15 @@ export function KitchenPage() {
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
   }, [ask, scan]);
 
+  const [typed, setTyped] = useState("");
+  const askTyped = (e: FormEvent) => {
+    e.preventDefault();
+    const q = typed.trim();
+    if (!q) return;
+    setTyped("");
+    void ask(null, q);
+  };
+
   const start = async (idea: BuildIdea) => {
     setStatus({ kind: "busy", text: `Building the ${idea.title.toLowerCase()}…` });
     try { await startBuildIdea(idea.idea_id); } catch (e) { setStatus({ kind: "error", text: describeError(e) }); }
@@ -297,7 +307,8 @@ export function KitchenPage() {
             <p className="preview-hud-step">{step ? `Step ${step.index}: ${step.instruction}` : "Done!"}</p>
           </>
         ) : <p className="preview-hud-muted">Nothing built yet.</p>}
-        <p className="preview-hud-muted">{twins.length ? `${twins.length} objects${labelled ? "" : " (naming…)"}` : "No scan yet."}</p>
+        {twins.length > 0 ? <p className="preview-hud-muted">{twins.length} objects{labelled ? "" : " (naming…)"}</p>
+          : !plan?.parts.length && <p className="preview-hud-muted">No scan yet.</p>}
         {ideas.length > 0 && (
           <div className="kitchen-ideas">
             <p className="label">{finalIdeas ? "Kit's ideas" : "Ideas so far (Kit is still thinking)"}</p>
@@ -310,6 +321,11 @@ export function KitchenPage() {
             ))}
           </div>
         )}
+        <form className="kitchen-ask" onSubmit={askTyped}>
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askTyped(e); }}
+            placeholder="Ask Kit: What can I build?" aria-label="Ask Kit" />
+          <button type="submit" disabled={!typed.trim()}>Ask</button>
+        </form>
         <div className="kitchen-actions">
           <button type="button" className="primary" onClick={() => void scan()}>Scan (S)</button>
           <button type="button" onClick={() => void startOver()}>Start over</button>

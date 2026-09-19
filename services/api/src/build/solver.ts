@@ -22,6 +22,15 @@ export function oriented(t: Twin, o: Orientation): TwinShape | string {
     return o === "upright" ? { type: "cylinder", axis: "y", diameter: t.shape.diameter, length: t.shape.length } : `the ${t.label} would roll on its side; stand it upright`;
   }
   const [d0, d1, d2] = [...t.shape.size].sort((a, b) => b - a) as [number, number, number];
+  // Something not in the vocabulary (a bowl, a kettle) is only measured as a box: it rests the way it stands now, and
+  // turning it would put a bowl on its rim.
+  if (t.name === "other") {
+    const h = t.shape.size[1], up = { upright: d0, on_side: d1, flat: d2 }[o];
+    if (Math.abs(up - h) > 0.001) {
+      const now = Math.abs(h - d2) <= 0.001 ? "flat" : Math.abs(h - d0) <= 0.001 ? "upright" : "on side";
+      return `the ${t.label} only rests the way it stands now; keep it ${now}`;
+    }
+  }
   if (o === "flat") return { type: "box", size: [d0, d2, d1] };
   if (o === "upright") return { type: "box", size: [d1, d0, d2] };
   return { type: "box", size: [d0, d1, d2] };

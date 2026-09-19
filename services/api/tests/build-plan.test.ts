@@ -112,6 +112,23 @@ describe("chooseSite", () => {
     expect(beside).toBeGreaterThan(5);
   });
 
+  it("on a crowded kitchen counter, finds the clear spot nearest the pile instead of drawing over what stands there", () => {
+    // A 3 × 0.64 m counter against a wall. The design's pieces are spread along it, so beside the pile is off the
+    // counter, in front is off the edge, and the pile's middle is where four cans (not in the design) stand.
+    const counter: Surface = { surface_id: "s1", kind: "table", y: 0.92, points: 2000, min: [-1.5, -0.62], max: [1.5, 0.02], rect: { centre: [0, -0.3], len: 3, wid: 0.64, yaw_deg: 0 } };
+    const pile = { min: [-0.6, -0.5] as [number, number], max: [1.0, -0.1] as [number, number] };
+    const cans = { min: [0.04, -0.39] as [number, number], max: [0.31, -0.16] as [number, number] };
+    const box = { min: [-0.95, -0.4] as [number, number], max: [-0.65, -0.2] as [number, number] };
+    const design = { w: 0.6, d: 0.35 };
+    const site = chooseSite(counter, pile, design, [0, 1.62, 1.0], [cans, box]);
+    const th = (site.yaw_deg * Math.PI) / 180, r = [Math.cos(th), -Math.sin(th)], f = [Math.sin(th), Math.cos(th)];
+    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => [site.position[0] + r[0]! * a! * 0.3 + f[0]! * b! * 0.175, site.position[2] + r[1]! * a! * 0.3 + f[1]! * b! * 0.175]);
+    for (const [x, z] of pts) expect([x! >= -1.5 && x! <= 1.5, z! >= -0.62 && z! <= 0.02]).toEqual([true, true]);
+    const [minX, maxX, minZ, maxZ] = [Math.min(...pts.map((q) => q[0]!)), Math.max(...pts.map((q) => q[0]!)), Math.min(...pts.map((q) => q[1]!)), Math.max(...pts.map((q) => q[1]!))];
+    for (const o of [cans, box]) expect(maxX <= o.min[0] || minX >= o.max[0] || maxZ <= o.min[1] || minZ >= o.max[1]).toBe(true);
+    expect(Math.abs(site.position[0] - 0.2)).toBeLessThan(0.7);                 // near the pile, not at the far end of the counter
+  });
+
   it("still gives a spot when every clear one is taken", () => {
     const everywhere = [{ min: [-5, -5] as [number, number], max: [5, 5] as [number, number] }];
     const site = chooseSite(table, { min: [-0.1, 0.5], max: [0.1, 0.6] }, { w: 0.35, d: 0.35 }, [0, 1.6, -1], everywhere);

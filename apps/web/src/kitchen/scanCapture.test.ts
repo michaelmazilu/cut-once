@@ -1,4 +1,6 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
+import { disposeGroup } from "./glow";
 import { KITCHEN } from "./kitchenScene";
 import { FOV_Y_DEG, encodePoints } from "./scanCapture";
 
@@ -40,6 +42,21 @@ describe("the kitchen", () => {
 
   it("gives every vocabulary object a truth name, so a scan of it can be scored", () => {
     const named = KITCHEN.objects.filter((o) => o.truth).map((o) => o.truth);
-    expect(named).toEqual(expect.arrayContaining(["pizza_box", "tall_can", "water_bottle", "cardboard_box", "tape_roll", "mug"]));
+    expect(named).toEqual(expect.arrayContaining(["pizza_box", "drink_can", "water_bottle", "cardboard_box", "tape_roll", "mug"]));
+  });
+});
+
+describe("clearing the objects' glows", () => {
+  it("takes each label's tag out of the page, however deep it hangs", () => {
+    // A glow holds its label; three only tells a label it was removed when it is removed from ITS parent, so
+    // emptying the group left the tags floating over the kitchen after a build began.
+    const group = new THREE.Group(), glow = new THREE.Group();
+    let removed = 0;
+    const label = Object.assign(new THREE.Object3D(), { isCSS2DObject: true, element: { remove: () => { removed++; } } });
+    glow.add(label as unknown as THREE.Object3D);
+    glow.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial()));
+    group.add(glow);
+    disposeGroup(glow);
+    expect(removed).toBe(1);
   });
 });

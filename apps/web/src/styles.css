@@ -322,3 +322,5 @@ a.link-card:hover h2 { color: var(--accent); }
 .kitchen-idea { margin: 8px 0; padding: 8px; border: 1px solid var(--border-strong); }
 .kitchen-idea p { margin: 4px 0 6px; font-size: var(--fs-sm); color: var(--text-muted); }
 .kitchen-actions { display: flex; gap: 8px; margin-top: 12px; }
+.kitchen-ask { display: flex; gap: 6px; margin-top: 12px; }
+.kitchen-ask input { flex: 1; min-width: 0; }

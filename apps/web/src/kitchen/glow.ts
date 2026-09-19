@@ -51,8 +51,14 @@ export function twinGlow(t: Twin, opts: { named: boolean; highlighted: boolean }
   return g;
 }
 
+/**
+ * Frees a glow and everything hanging off it. A label's tag is a page element, and three only takes one out of the
+ * page when that label itself is removed from its parent — not when an ancestor is — so each one goes by hand.
+ */
 export function disposeGroup(root: THREE.Object3D): void {
   root.traverse((o) => {
+    const label = o as THREE.Object3D & { isCSS2DObject?: boolean; element?: { remove: () => void } };
+    if (label.isCSS2DObject) label.element?.remove();
     const m = o as THREE.Mesh;
     if (m.isMesh) { m.geometry.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((x) => x.dispose()); }
   });

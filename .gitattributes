@@ -22,3 +22,6 @@
 # Test fixtures stay in plain git: every checkout, CI's test job included, must have the real bytes
 data/fixtures/**/*.jpg -filter -diff -merge binary
 data/fixtures/**/*.png -filter -diff -merge binary
+
+# The web kitchen test scene: plain git, so every checkout and the web build have the real files
+apps/web/public/kitchen/** -filter -diff -merge binary

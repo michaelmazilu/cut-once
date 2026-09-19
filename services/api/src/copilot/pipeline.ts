@@ -18,7 +18,8 @@ import { transcribe } from "./stt.js";
 import type { Speech } from "./tts.js";
 import type { TurnMemory } from "./turns.js";
 
-export interface QueryInput { assemblyId: string; context: CopilotContext; audio: Buffer; frame: Buffer | null; uploadMs: number }
+/** `said`: a typed question, used instead of hearing `audio` (which is then empty). */
+export interface QueryInput { assemblyId: string; context: CopilotContext; audio: Buffer; said?: string | null; frame: Buffer | null; uploadMs: number }
 export interface Deps { ctx: Ctx; models: CopilotModels; speech: Speech; turns: TurnMemory; cache: DemoCache }
 
 type Log = { info: (o: object, m: string) => void; warn: (o: object, m: string) => void };
@@ -97,7 +98,7 @@ export async function answerQuery(deps: Deps, input: QueryInput, log: Log): Prom
   const sttStart = Date.now();
   let transcript = "";
   let sttFailed = false;
-  try { transcript = await transcribe(ctx.cfg, m, input.audio); }
+  try { transcript = input.said ?? await transcribe(ctx.cfg, m, input.audio); }
   catch (err) { sttFailed = true; log.warn({ turn: turnId, err: (err as Error).message }, "transcription failed"); }
   timings.stt = since(sttStart);
   if (!transcript) return unheard(deps, turnId, sttFailed, timings, t0, recordTurn);
@@ -237,7 +238,7 @@ async function kitTurn(
   if (!primary) return null;
   const context = build.kitContext();
   const run = (ai: AiCall, timeoutMs: number) => withCap(runKitTurn({
-    cfg: ctx.cfg, m, ai, audio: input.audio, frame: input.frame, context, building: buildingNow(g, context.started),
+    cfg: ctx.cfg, m, ai, audio: input.audio, said: input.said ?? null, frame: input.frame, context, building: buildingNow(g, context.started),
     turns: deps.turns.history(input.assemblyId, 2), timeoutMs,
   }), timeoutMs + 250);
   let result: KitTurnResult | null = null, used = primary;

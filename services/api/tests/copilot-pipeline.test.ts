@@ -440,6 +440,22 @@ describe("build mode: Kit's turn", () => {
     expect([call.ai.provider, call.context.status, call.building, call.audio.length > 0]).toEqual(["openai", "showing 3 designs", null, true]);
   });
 
+  it("a typed question needs no voice clip: Kit gets the words as what was said", async () => {
+    onTable();
+    kitHears({ heard: "will the box hold a mug", answer: "Yes, the pizza box can." });
+    const res = await t.app.inject({
+      method: "POST", url: `/v1/assemblies/${aid()}/copilot/query`,
+      ...multipart([
+        { name: "context", value: JSON.stringify({ ...baseContext(), assembly_id: aid(), mode: "build" }) },
+        { name: "question", value: "  will the box hold a mug " },
+        { name: "frame", value: frame(), filename: "f.jpg", type: "image/jpeg" },
+      ]),
+    });
+    expect([res.statusCode, res.json().answer_text]).toEqual([200, "Yes, the pizza box can."]);
+    const call = runKitTurn.mock.calls[0]![0];
+    expect([call.said, call.audio.length, transcribe.mock.calls.length]).toEqual(["will the box hold a mug", 0, 0]);
+  });
+
   it("a wish with nothing known yet starts a scan that carries it", async () => {
     onTable({ twins: [], ideas: [], status: "nothing scanned yet" });
     const expect_ = vi.spyOn(build(), "expectScan");

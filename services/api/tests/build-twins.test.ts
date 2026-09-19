@@ -18,6 +18,22 @@ describe("surfaces", () => {
   });
 });
 
+describe("a wall right behind the table (a kitchen counter's backsplash)", () => {
+  // Every height the table's objects reach, the wall reaches too: a 1 cm slice of it, joined to the tops and sides of
+  // the things in front, once passed for a second table 4 cm up, which cut every can in half and hid the pizza box.
+  const WALL: Prim = { kind: "box", min: [-2, 0, 1.02], max: [2, 2.5, 1.05] };
+  const scene = [FLOOR, TABLE, WALL, box(-0.25, 0.75, 0.35, 0.04, 0.35), can(0.1, 0.5), can(0.22, 0.5), can(0.16, 0.66), can(0.3, 0.9)];
+
+  it("is not a surface, not part of the table, and the objects in front keep their full height", () => {
+    const { surfaces, twins } = run(scene, 0.004);
+    expect(surfaces.map((s) => s.kind).sort()).toEqual(["floor", "table"]);
+    const table = surfaces.find((s) => s.kind === "table")!.rect!;
+    expect([Math.abs(Math.max(table.len, table.wid) - 1.2) < 0.06, Math.abs(Math.min(table.len, table.wid) - 0.8) < 0.06]).toEqual([true, true]);
+    const heights = twins.map((t) => Math.round(heightOf(t.shape) * 100)).sort((a, b) => a - b);
+    expect(heights).toEqual([4, 16, 16, 16, 16]);
+  });
+});
+
 describe("objects on the table and the floor", () => {
   const scene = [FLOOR, TABLE, box(-0.2, 0.55, 0.3, 0.1, 0.2), can(0.15, 0.5), box(0.45, 0.02, 0.35, 0.3, 0.25, 0)];
 

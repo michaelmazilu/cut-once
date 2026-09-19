@@ -36,6 +36,13 @@ describe("solve", () => {
     expect(r).toMatchObject({ ok: false });
     expect(!r.ok && r.reason).toMatch(/differ by 35 mm/);
   });
+  it("keeps something outside the vocabulary the way it stands: a bowl measured as a box is never stood on its rim", () => {
+    const bowl = twin({ twin_id: "o9", name: "other", label: "fruit bowl", shape: { type: "box", size: [0.22, 0.08, 0.14] } });
+    const withBowl = new Map([...kit, ["o9", bowl]]);
+    const r = solve(draft([step({ place: "o9", orientation: "upright" })]), withBowl);
+    expect(!r.ok && r.reason).toBe("the fruit bowl only rests the way it stands now; keep it flat");
+    expect(solve(draft([step({ place: "o9", orientation: "flat" })]), withBowl)).toMatchObject({ ok: true });
+  });
   it("refuses a can on its side", () => expect(solve(draft([step({ place: "o1", orientation: "on_side" })]), kit)).toMatchObject({ ok: false }));
   it("refuses overlaps", () => expect(solve(draft([step({ place: "o1", at_cm: { x: 0, z: 0 } }), step({ place: "o2", at_cm: { x: 3, z: 0 } })]), kit)).toMatchObject({ ok: false }));
   it("puts next_to things beside each other with the gap", () => {

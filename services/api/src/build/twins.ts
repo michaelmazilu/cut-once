@@ -77,9 +77,24 @@ function view(cloud: Cloud, opts: Options) {
   const { cols, rows, xyz, cam } = cloud;
   const x = (i: number) => xyz[3 * i]!, y = (i: number) => xyz[3 * i + 1]!, z = (i: number) => xyz[3 * i + 2]!;
   const range = (i: number) => Math.hypot(x(i) - cam[0], y(i) - cam[1], z(i) - cam[2]);
+  const ok = (i: number) => !Number.isNaN(xyz[3 * i]!);
+  // Walls, and the sides of things: the cells two rows up AND down (where there are any) rise more than they move
+  // away. A 1 cm slice of a backsplash is at a table's height as much as the table is; this keeps it from counting as
+  // one. Two rows, not one, so depth noise (which moves a wall's points along the ray, not up it) cannot pass for a slope.
+  const steep = new Uint8Array(cols * rows);
+  for (let i = 0; i < cols * rows; i++) {
+    if (!ok(i)) continue;
+    let checked = 0, rising = 0;
+    for (const j of [i - 2 * cols, i + 2 * cols]) {
+      if (j < 0 || j >= cols * rows || !ok(j)) continue;
+      checked++;
+      if (Math.abs(y(i) - y(j)) > Math.hypot(x(i) - x(j), z(i) - z(j))) rising++;
+    }
+    steep[i] = checked > 0 && rising === checked ? 1 : 0;
+  }
   return {
-    cols, rows, n: cols * rows, x, y, z, range,
-    ok: (i: number) => !Number.isNaN(xyz[3 * i]!),
+    cols, rows, n: cols * rows, x, y, z, range, steep,
+    ok,
     xz: (cells: number[]) => cells.map((i) => [x(i), z(i)] as P2),
     dist3: (i: number, j: number) => Math.hypot(x(i) - x(j), y(i) - y(j), z(i) - z(j)),
     /** How far a point may sit from a surface's height and still be that surface. */
@@ -122,7 +137,7 @@ function grow(v: View, start: number, seen: Uint8Array, reach: number, member: (
  */
 function findLevels(v: View, opts: Options): number[] {
   const bins = new Map<number, number>();
-  for (let i = 0; i < v.n; i++) if (v.ok(i)) { const b = Math.round(v.y(i) / 0.01); bins.set(b, (bins.get(b) ?? 0) + 1); }
+  for (let i = 0; i < v.n; i++) if (v.ok(i) && !v.steep[i]) { const b = Math.round(v.y(i) / 0.01); bins.set(b, (bins.get(b) ?? 0) + 1); }
   const win = (b: number) => (bins.get(b - 1) ?? 0) + (bins.get(b) ?? 0) + (bins.get(b + 1) ?? 0);
   // Ties go to the bin with more points of its own, then the lower one: a clean scan puts a whole table in ONE bin, so
   // its two neighbours' windows tie with it.
@@ -163,7 +178,7 @@ function findSurfaces(v: View, levels: number[], opts: Options): { surfaces: Sur
   const kept: Region[] = [];
   let floorFound = false;
   for (const level of levels) {
-    const at = (i: number) => v.ok(i) && !isSurface[i] && Math.abs(v.y(i) - level) <= v.band(i);
+    const at = (i: number) => v.ok(i) && !v.steep[i] && !isSurface[i] && Math.abs(v.y(i) - level) <= v.band(i);
     const seen = new Uint8Array(v.n);
     let found: Region[] = [];
     for (let s = 0; s < v.n; s++) if (!seen[s] && at(s)) {
