@@ -310,3 +310,15 @@ a.link-card:hover h2 { color: var(--accent); }
 .copilot-frame { position: relative; display: inline-block; max-width: 100%; margin-bottom: var(--s3); }
 .copilot-frame img { display: block; max-width: 100%; }
 .copilot-frame svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* /kitchen: the pretend kitchen for build mode */
+.kitchen-canvas { position: absolute; inset: 0; }
+.kitchen-canvas canvas { display: block; }
+.kitchen-labels { position: absolute; inset: 0; pointer-events: none; }
+.kitchen-label { padding: 2px 8px; border-radius: 10px; background: rgba(8, 24, 40, 0.72); color: #cfe9ff; font: 600 12px var(--sans, system-ui); white-space: nowrap; border: 1px solid rgba(79, 182, 255, 0.6); }
+.kitchen-label.unnamed { color: #9aa7b6; border-color: rgba(124, 141, 163, 0.5); }
+.kitchen-panel { width: 300px; pointer-events: auto; max-height: calc(100vh - 96px); overflow: auto; }
+.kitchen-ideas { margin-top: 10px; }
+.kitchen-idea { margin: 8px 0; padding: 8px; border: 1px solid var(--border-strong); }
+.kitchen-idea p { margin: 4px 0 6px; font-size: var(--fs-sm); color: var(--text-muted); }
+.kitchen-actions { display: flex; gap: 8px; margin-top: 12px; }

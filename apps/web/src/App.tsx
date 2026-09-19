@@ -6,6 +6,7 @@ import { DirectorPage } from "./director/DirectorPage";
 import { HistoryPage } from "./history/HistoryPage";
 import { PreviewPage } from "./preview/PreviewPage";
 import { SimPage } from "./sim/SimPage";
+import { KitchenPage } from "./kitchen/KitchenPage";
 import { ReviewPage } from "./review/ReviewPage";
 import { UploadPage } from "./upload/UploadPage";
 import { ThemeSwitch } from "./ThemeSwitch";
@@ -140,7 +141,7 @@ function NotFound() {
 }
 
 /** Pages that fill the whole window, like the headset's view: no top bar. */
-const BARE_PAGES = new Set(["/preview", "/sim"]);
+const BARE_PAGES = new Set(["/preview", "/sim", "/kitchen"]);
 
 export function App() {
   const token = useToken();
@@ -151,6 +152,7 @@ export function App() {
       <Routes>
         <Route path="/preview" element={<PreviewPage />} />
         <Route path="/sim" element={<SimPage />} />
+        <Route path="/kitchen" element={<KitchenPage />} />
       </Routes>
     );
   }

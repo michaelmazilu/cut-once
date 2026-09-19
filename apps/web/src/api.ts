@@ -1,7 +1,7 @@
 import {
   AssemblySchema, BuildStateSchema, JobSchema, PlanSchema, S,
   type Assembly, type BuildEvent, type BuildIdea, type BuildState, type CopilotContext, type CopilotResponse, type DirectorCommand, type Job, type Plan,
-  type RetrievedChunk, type Twin,
+  type BuildScanUpload, type RetrievedChunk, type Twin,
 } from "@cutonce/schemas";
 import type { ZodTypeAny } from "zod";
 import { clearToken, getToken } from "./auth";
@@ -315,6 +315,8 @@ export interface BuildScanRow { scan_id: string; session_id: string | null; capt
 /** `standard`: the object has a standard size, so it can be added by hand. */
 export interface BuildVocabItem { name: string; label: string; standard: boolean }
 export const getBuildCurrent = () => request<BuildCurrent>("GET", "/v1/build/sessions/current");
+/** One scan, exactly as the headset uploads it (the web kitchen's pretend headset uses this). */
+export const postBuildScan = (upload: BuildScanUpload) => request<{ scan_id: string; session_id: string }>("POST", "/v1/build/scans", { body: upload });
 export const listBuildScans = () => request<{ scans: BuildScanRow[] }>("GET", "/v1/build/scans");
 export const replayBuildScan = (scanId: string, labels: "saved" | "live") => request<{ session_id: string }>("POST", `/v1/build/scans/${enc(scanId)}/replay`, { body: { labels } });
 export const startBuildIdea = (ideaId: string) => request<{ assembly_id: string; plan_id: string; revision: number }>("POST", `/v1/build/ideas/${enc(ideaId)}/start`, { body: {} });
