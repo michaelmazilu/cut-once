@@ -30,7 +30,8 @@ export function models(cfg: Config, env: Record<string, string | undefined> = pr
     budgets: {
       stt: num(env.COPILOT_STT_MS, 3000),
       // The router overlaps retrieval and annotation, and the answer model waits for it: a slow router is dropped, not awaited.
-      route: num(env.COPILOT_ROUTE_MS, 700),
+      // 1000: gpt-5.6-luna routes in 0.74 s median, 0.86 s at worst (reasoning off, router.ts); 700 dropped most turns.
+      route: num(env.COPILOT_ROUTE_MS, 1000),
       retrieve: num(env.COPILOT_RETRIEVE_MS, 800),
       llm: num(env.COPILOT_LLM_MS, 6000),
       tool: num(env.COPILOT_TOOL_MS, 2000),

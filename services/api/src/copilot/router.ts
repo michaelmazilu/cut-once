@@ -29,13 +29,14 @@ export const ROUTER_SYSTEM = [
 /**
  * Which flow a spoken turn wants. Null means "treat it as a question": no provider, a timeout, an error or a malformed
  * answer. The pipeline routes on OpenAI, as the rest of an E7 or desk turn runs, with its small router model
- * (OPENAI_ROUTER_MODEL) and COPILOT_ROUTE_MS.
+ * (OPENAI_ROUTER_MODEL) and COPILOT_ROUTE_MS. It does not reason: gpt-5.6-luna at its default effort took a median
+ * 1.1 s to route one sentence (0 of 5 inside 700 ms) and got two wishes wrong; at "none", 0.74 s and all five right.
  */
 export async function routeTurn(cfg: Config, m: CopilotModels, input: RouteInput, ai: AiCall | null): Promise<Routed | null> {
   if (!ai) return null;
   const budget = m.budgets.route;
   const work = ai.call(cfg, {
-    name: "route", model: ai.provider === "openai" ? m.router : ai.model, schema: Routed, system: ROUTER_SYSTEM, timeoutMs: budget,
+    name: "route", model: ai.provider === "openai" ? m.router : ai.model, schema: Routed, system: ROUTER_SYSTEM, timeoutMs: budget, reasoningEffort: "none",
     text: `MODE: ${input.mode}\nSAID: "${input.transcript}"`,
   }).then((r) => Routed.parse(r));
   const timeout = new Promise<null>((resolve) => { const t = setTimeout(() => resolve(null), budget); t.unref?.(); });

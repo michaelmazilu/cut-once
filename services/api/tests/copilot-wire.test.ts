@@ -128,6 +128,7 @@ describe("the real OpenAI calls", () => {
       expect(seen.map((s) => s.path)).toEqual(["transcriptions", "chat", "chat"]);
       expect(seen[0]!.model).toBe("gpt-transcribe");
       expect(seen[1]).toMatchObject({ model: "gpt-5.6-luna", schema: "route", tools: 0, images: 0 });   // text only: the router never sees the camera
+      expect(seen[1]!.effort).toBe("none");   // at the default effort gpt-5.6-luna routes in ~1.1 s, past its budget every time
       expect(seen[2]).toMatchObject({ model: "gpt-5.6-luna", schema: "copilot_answer", tools: 5, images: 2, effort: "none" });   // tools need it (see the stand-in), and it keeps the answer inside the 6 s budget
     } finally { await t.cleanup(); }
   });

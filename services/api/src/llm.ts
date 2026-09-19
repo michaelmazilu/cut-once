@@ -32,6 +32,8 @@ export interface JsonCall<S extends ZodTypeAny> {
   model?: string;
   /** A voice clip. Only the OMNI helper (omni.ts) sends one; OpenAI's path transcribes first. */
   audio?: { data: Buffer; format: "wav" | "mp3" };
+  /** OpenAI only: how long a reasoning model may think. Unset is the model's default; "none" is for a job with a sub-second budget. */
+  reasoningEffort?: "none" | "low" | "medium" | "high";
 }
 
 /** The schema actually sent to the model. */
@@ -52,6 +54,7 @@ export async function jsonCall<S extends ZodTypeAny>(cfg: Config, call: JsonCall
       ] },
     ],
     response_format: { type: "json_schema", json_schema: { name: call.name, strict: true, schema: schemaFor(call) } },
+    ...(call.reasoningEffort ? { reasoning_effort: call.reasoningEffort } : {}),
   });
   const content = res.choices[0]?.message?.content;
   if (!content) throw new Error(`the model returned no content (${res.choices[0]?.finish_reason ?? "unknown reason"})`);
