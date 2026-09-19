@@ -12,7 +12,7 @@ import { Strict, type CopilotContext } from "@cutonce/schemas";
 import { REPO_ROOT } from "../src/config.js";
 import { auth, makeApp } from "./helpers.js";
 
-type Seen = { path: string; model?: string; schema?: string; tools: number; images: number; toolResults: number; at: number };
+type Seen = { path: string; model?: string; schema?: string; tools: number; images: number; toolResults: number; effort?: string; at: number };
 const seen: Seen[] = [];
 const stand = { toolRound: false, flow: "question", heard: "where does the power cable run" };
 /** The answer model's calls. The router's call goes out first on every turn that reaches a model. */
@@ -28,11 +28,17 @@ async function openai(req: IncomingMessage, res: ServerResponse) {
     seen.push({ path: "transcriptions", model: /name="model"\r\n\r\n([^\r]+)/.exec(raw.toString("latin1"))?.[1], tools: 0, images: 0, toolResults: 0, at: Date.now() });
     return send({ text: stand.heard });
   }
-  const b = JSON.parse(raw.toString()) as { model: string; tools?: unknown[]; response_format?: { json_schema?: { name?: string } }; messages: { role: string; content: unknown }[] };
+  const b = JSON.parse(raw.toString()) as { model: string; tools?: unknown[]; reasoning_effort?: string; response_format?: { json_schema?: { name?: string } }; messages: { role: string; content: unknown }[] };
   const parts = b.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])) as { type: string }[];
   const schema = b.response_format?.json_schema?.name;
   seen.push({ path: "chat", model: b.model, schema, tools: b.tools?.length ?? 0, images: parts.filter((p) => p.type === "image_url").length,
-    toolResults: b.messages.filter((m) => m.role === "tool").length, at: Date.now() });
+    toolResults: b.messages.filter((m) => m.role === "tool").length, effort: b.reasoning_effort, at: Date.now() });
+  // The real gpt-5.6-luna is a reasoning model: chat completions refuse function tools unless reasoning_effort is "none".
+  // The stand-in says the same, in the real words, so a request the real model would refuse fails here too.
+  if (b.tools?.length && b.reasoning_effort !== "none") {
+    res.writeHead(400, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: `Function tools with reasoning_effort are not supported for ${b.model} in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.`, type: "invalid_request_error", param: null, code: null } }));
+  }
   const reply = (content: string | null, tool_calls?: object[]) => send({ id: "chatcmpl_wire", object: "chat.completion", created: 0, model: b.model,
     choices: [{ index: 0, finish_reason: tool_calls ? "tool_calls" : "stop", message: { role: "assistant", content, ...(tool_calls ? { tool_calls } : {}) } }] });
   if (schema === "route") return reply(JSON.stringify({ flow: stand.flow, confidence: 0.95 }));
@@ -122,7 +128,8 @@ describe("the real OpenAI calls", () => {
       expect(seen.map((s) => s.path)).toEqual(["transcriptions", "chat", "chat"]);
       expect(seen[0]!.model).toBe("gpt-transcribe");
       expect(seen[1]).toMatchObject({ model: "gpt-5.6-luna", schema: "route", tools: 0, images: 0 });   // text only: the router never sees the camera
-      expect(seen[2]).toMatchObject({ model: "gpt-5.6-luna", schema: "copilot_answer", tools: 5, images: 2 });
+      expect(seen[1]!.effort).toBe("none");   // at the default effort gpt-5.6-luna routes in ~1.1 s, past its budget every time
+      expect(seen[2]).toMatchObject({ model: "gpt-5.6-luna", schema: "copilot_answer", tools: 5, images: 2, effort: "none" });   // tools need it (see the stand-in), and it keeps the answer inside the 6 s budget
     } finally { await t.cleanup(); }
   });
 
@@ -132,6 +139,7 @@ describe("the real OpenAI calls", () => {
     try {
       expect((await question(t)).statusCode).toBe(200);
       expect(answers().map((c) => [c.tools, c.toolResults])).toEqual([[5, 0], [0, 3]]);
+      expect(answers().map((c) => c.effort)).toEqual(["none", "none"]);
     } finally { await t.cleanup(); }
   });
 

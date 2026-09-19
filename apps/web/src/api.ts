@@ -1,7 +1,7 @@
 import {
   AssemblySchema, BuildStateSchema, JobSchema, PlanSchema, S,
   type Assembly, type BuildEvent, type BuildIdea, type BuildState, type CopilotContext, type CopilotResponse, type DirectorCommand, type Job, type Plan,
-  type BuildScanUpload, type RetrievedChunk, type Twin,
+  type BuildScanUpload, type RetrievedChunk, type Surface, type Twin,
 } from "@cutonce/schemas";
 import type { ZodTypeAny } from "zod";
 import { clearToken, getToken } from "./auth";
@@ -281,11 +281,23 @@ export async function askCopilot(assemblyId: string, context: CopilotContext, au
   return data as CopilotResponse;
 }
 
-/** The answer's audio as a playable WAV object URL (the headset gets raw PCM; a browser needs WAV). */
-export async function fetchAnswerAudio(audioUrl: string): Promise<string> {
-  const res = await fetch(`${audioUrl}${audioUrl.includes("?") ? "&" : "?"}format=wav`, { headers: authHeaders() });
-  if (!res.ok) throw new ApiError(res.status, "audio", `audio ${res.status}`);
-  return URL.createObjectURL(await res.blob());
+/** How long a clip has to appear: the server makes it in the background once the answer's text is out (its own limit is 8 s). */
+const AUDIO_WAIT_MS = 8000;
+
+/**
+ * The answer's audio as a playable WAV object URL (the headset gets raw PCM; a browser needs WAV). The text arrives before
+ * the clip is finished, so a 404 just after an answer means "not yet": ask again, briefly, until it is there or the wait is
+ * over. Any other error is final.
+ */
+export async function fetchAnswerAudio(audioUrl: string, waitMs = AUDIO_WAIT_MS): Promise<string> {
+  const url = `${audioUrl}${audioUrl.includes("?") ? "&" : "?"}format=wav`;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (res.ok) return URL.createObjectURL(await res.blob());
+    if (res.status !== 404 || Date.now() >= deadline) throw new ApiError(res.status, "audio", `audio ${res.status}`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
 }
 
 // ── copilot (owner: Rhythm) ──────────────────────────────────────────────────
@@ -312,7 +324,7 @@ export async function fetchLastFrame(signal?: AbortSignal): Promise<string | nul
 }
 
 // ── build mode ───────────────────────────────────────────────────────────────
-export interface BuildCurrent { session: { session_id: string; created_at: string; scans: string[] } | null; wish: string | null; twins: Twin[]; ideas: BuildIdea[] }
+export interface BuildCurrent { session: { session_id: string; created_at: string; scans: string[] } | null; wish: string | null; surfaces?: Surface[]; twins: Twin[]; ideas: BuildIdea[] }
 export interface BuildScanRow { scan_id: string; session_id: string | null; captured_at: string | null; recording: boolean }
 /** `standard`: the object has a standard size, so it can be added by hand. */
 export interface BuildVocabItem { name: string; label: string; standard: boolean }
@@ -325,3 +337,5 @@ export const startBuildIdea = (ideaId: string) => request<{ assembly_id: string;
 export const addBuildObject = (name: string) => request<Twin>("POST", "/v1/build/objects", { body: { name } });
 export const newBuildSession = () => request<{ session_id: string }>("POST", "/v1/build/sessions", { body: {} });
 export const getBuildVocabulary = () => request<{ items: BuildVocabItem[] }>("GET", "/v1/build/vocabulary");
+/** Any text in Kit's voice (a step read aloud); play `audio_url` with fetchAnswerAudio. */
+export const sayBuild = (text: string) => request<{ turn_id: string; audio_url: string }>("POST", "/v1/build/say", { body: { text } });

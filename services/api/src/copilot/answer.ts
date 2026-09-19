@@ -36,7 +36,9 @@ export async function ask(ctx: Ctx, m: CopilotModels, input: AskInput): Promise<
   const schema = copilotAnswerSchema(input.gathered.plan.parts.map((p) => p.part_id), input.chunks.map((c) => c.chunk_id));
   const response_format = { type: "json_schema" as const, json_schema: { name: "copilot_answer", strict: true, schema } };
 
-  let res = await client.chat.completions.create({ model: m.chat, messages, tools: chatTools, response_format });
+  // reasoning_effort "none": gpt-5.6-luna is a reasoning model, and chat completions refuse function tools while it reasons
+  // (a 400 the headset sees as 503 copilot_unavailable). It also keeps the turn inside its budget: this is a grounded lookup, not a puzzle.
+  let res = await client.chat.completions.create({ model: m.chat, messages, tools: chatTools, response_format, reasoning_effort: "none" });
   const toolCalls: string[] = [];
   const calls = (res.choices[0]?.message?.tool_calls ?? []).flatMap((c) => (c.type === "function" ? [c] : []));
   if (calls.length > 0) {
@@ -54,7 +56,7 @@ export async function ask(ctx: Ctx, m: CopilotModels, input: AskInput): Promise<
       messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result.ok ? result.data : { error: result.error }) });
     });
     // Second pass without tools: the model has what it asked for, now it must answer.
-    res = await client.chat.completions.create({ model: m.chat, messages, response_format });
+    res = await client.chat.completions.create({ model: m.chat, messages, response_format, reasoning_effort: "none" });
   }
 
   const text = res.choices[0]?.message?.content;

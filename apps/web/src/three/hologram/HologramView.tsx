@@ -8,6 +8,7 @@ import type { Plan } from "@cutonce/schemas";
 import type { View } from "../../preview/previewParams";
 import { useTheme } from "../../ThemeSwitch";
 import { buildPartObject, disposeObject } from "../buildPart";
+import type { Aabb } from "@cutonce/project-model";
 import { placeCamera, planBounds } from "./cameras";
 import {
   COMPARE_OUTLINE, animate, applyStyle, bracketPositions, edgePositions, fatLines, gridPositions, lineMaterial, makeMaterials,
@@ -36,6 +37,8 @@ export interface HologramViewProps {
   onPoint?: (partId: string | null) => void;
   /** Exposes the camera, so /sim can project parts into a frame exactly as the headset would. */
   cameraRef?: MutableRefObject<THREE.PerspectiveCamera | null>;
+  /** What the camera frames, when not the whole plan: /sim's build mode frames the pile and the designs, not the table. */
+  frame?: Aabb | null;
 }
 
 interface PartRuntime {
@@ -69,6 +72,7 @@ const DEFAULT_VISUAL: PartVisual = { base: "MISSING", modifiers: [] };
 
 export function HologramView(props: HologramViewProps) {
   const { plan, visuals, compare, view, fov, background, still } = props;
+  const frameKey = props.frame ? JSON.stringify(props.frame) : "";          // a new object with the same box does not move the camera
   const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Stage | null>(null);
   const latest = useRef(props);
@@ -237,7 +241,7 @@ export function HologramView(props: HologramViewProps) {
 
     const bounds = planBounds(plan);
     for (const [id, runtime] of stage.parts) applyVisual(runtime, latest.current.visuals[id] ?? DEFAULT_VISUAL);
-    const target = placeCamera(stage.camera, bounds, latest.current.view);
+    const target = placeCamera(stage.camera, latest.current.frame ?? bounds, latest.current.view);
     stage.controls.target.copy(target);
     stage.controls.update();
     void Promise.allSettled(pending).then(() => { if (!disposed) stage.ready.waiting = true; });
@@ -284,10 +288,10 @@ export function HologramView(props: HologramViewProps) {
     const stage = stageRef.current;
     if (!stage) return;
     stage.camera.fov = fov;
-    const target = placeCamera(stage.camera, planBounds(plan), view);
+    const target = placeCamera(stage.camera, latest.current.frame ?? planBounds(plan), view);
     stage.controls.target.copy(target);
     stage.controls.update();
-  }, [view, fov, plan]);
+  }, [view, fov, plan, frameKey]);
 
   // ── background: the passthrough stand-in ───────────────────────────────────
   const bgKey = background.kind === "image" ? `image:${background.src}` : background.kind;
