@@ -70,3 +70,25 @@ mockups for screenshots of the running build.
 These need explicit geometry/motion regressions and measured device sequences.
 Semantic masks are necessary for the clutter requirement but do not, alone,
 solve moving-object synchronization or persistent identity.
+
+## Experimental mask evidence, not a shipping feature
+
+A separate Linux experiment keeps the already-tested YOLO recognizer as the only
+source of labels and detections, then associates RTMDet-tiny 320 mask proposals
+by matching winning class and at least .5 box IoU. It does not change standalone
+RTMDet's failed recognition gate or promote its weights into the application.
+All ten accepted detections in the two existing photos received a proposal; only
+the four fixed bottle/table targets have ground-truth quality checks.
+
+Those four targets pass the existing mask-IoU >= .5 threshold: bottles .907/.932,
+tables .734/.777. Inspection of the exact predicted pixels exposes an important
+remaining failure: table masks cover foreground bottles, food, boards/glass and
+parts of a person. Passing aggregate IoU is therefore **not proof of exclusive
+visible-object coverage**. No masks were retouched to make the preview cleaner.
+
+This experiment adds a second model and measured 188–361ms of masking work per
+photo on a shared Linux CPU, excluding YOLO and XR rendering. It has not run
+end-to-end in Unity or on Quest, and is not included in the latest APK. Broader
+scenes, overlap ownership, native capture correspondence, memory and measured
+headset latency remain promotion gates. The recorded-photo preview is evidence
+of the experimental masks, not a screenshot of the final application.

@@ -155,3 +155,68 @@ and no alternate mask was chosen using ground-truth overlap.
 These failed alternatives remain experiments, not additional dependencies or
 weights in the app. Repeating their setup or relaxing the acceptance cutoff is
 not a fix for object-only highlighting.
+
+## Experimental hybrid: production YOLO recognition plus RTMDet masks
+
+`hybrid.py` is a separate **experimental recorded-photo harness**, not production
+integration or workflow promotion. It keeps actual scanner-accepted production
+YOLO detections as the sole recognition authority. For every accepted detection,
+it requires the RTMDet proposal's winning class ID to match and its decoded box
+to overlap the actual YOLO box with IoU≥.5. Eligible proposals are ordered by
+RTMDet class score, with the lowest anchor index breaking exact ties. No ground
+truth enters this selector. No eligible proposal means rejection without a box
+fill, mask fallback, relabeling, or additional recognized object.
+
+There is deliberately **no absolute RTMDet recognition threshold in this distinct
+mask-estimator role**. YOLO's .4 scanner confidence and .5 NMS remain unchanged;
+the standalone RTMDet acceptance failures above are preserved, not relabeled as
+passes. Class IDs use the fixed 80-class COCO ordering; the bundled YOLO's legacy
+names (such as `sofa`/`couch`) have explicit same-ID mappings rather than guessing
+from predictions. All accepted classes are retained. More than eight accepted
+objects rejects the run instead of silently selecting a preferred subset.
+
+All paths and external trust anchors must be supplied. Expected SHA256 values
+must come from the trusted captured-run/export handoff; do not replace them with
+hashes calculated blindly from whichever inputs happen to be present:
+
+```sh
+python tools/quest/segmentation/hybrid.py \
+  --yolo-report /path/to/captured/recognition-proof/report.json \
+  --yolo-report-sha256 ac8ec6206c454f4454f7b78a6b919e0d871e8e4c15499a9fd571dd4c154d6d22 \
+  --candidate apps/quest/Logs/cli/segmentation-candidate-320-v2 \
+  --candidate-manifest-sha256 0c25a2c595ff388a395f13783cc09190f3c351615d38bffd1863eba1abb3a906 \
+  --photos /path/to/pinned/coco-photos \
+  --output apps/quest/Logs/cli/hybrid-mask-experiment-320
+```
+
+These example pins identify the captured Mac run `35499902362` and the local
+tiny320-v2 export; other inputs need their independently trusted pins. Output
+must be fresh/empty. The two exact existing photos and their hashes are mandatory.
+The harness verifies the candidate's class map, graph/tensor/sidecar hashes,
+passed numerical prerequisite and fixed tolerance, successful first recorded
+YOLO inference, source-image coordinates, acceptance flags, and finite tensor/
+detection values. It verifies freshly preprocessed pixels against the candidate's
+frozen inputs. It never switches to a later inference or omits a failed object.
+
+Outputs are `report.json` plus one `*-masks.npz` per photo, containing selected
+bool masks at original-photo resolution, logits, YOLO indices and proposal
+anchors. No images are produced. The report records associations, candidate
+rankings, original standalone status, input pins and timing. Exit status is
+nonzero for invalid inputs, unmatched detections, or any failed target gate.
+Tests run with the existing `unittest discover` command above.
+
+The prescribed 320-input experiment associated all ten accepted YOLO detections and
+passed the same four GT checks (bbox IoU≥.4, mask IoU≥.5): bottle/table mask IoUs
+were **.907/.734 on 160012 and .932/.777 on 146489**. That validates four masks
+against GT—not all ten masks merely because ten associations exist. 640 was not
+run because 320 passed. Linux CPU extra masking was 188–361ms/photo in the initial
+experiment, excluding YOLO and XR costs; this is not a Quest speed estimate.
+
+**The actual mask preview also exposed overcoverage:** the table mask included
+parts of bottles, pizza, a board, glass and a foreground body. A passing broad
+COCO IoU does not establish exclusive visible-object ownership or clean wrapping.
+No masks were retouched to improve the preview, and thresholds remain unchanged.
+The report therefore explicitly sets `exclusiveVisibleSurfaceValidated:false`.
+Broader crowded/occluded ownership negatives, Unity end-to-end comparison,
+capture-pose projection, temporal stability and real Quest memory/latency checks
+remain prerequisites for any runtime promotion.
