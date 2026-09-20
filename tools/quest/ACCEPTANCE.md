@@ -16,10 +16,11 @@ The last Mac USB probe (`35499599170`) found no connected devices.
 
 Pending follow-ups: `2f97de5` adds direct asynchronous camera snapshots and
 25 lifecycle regressions, plus sRGB/UNorm GPU snapshot checks. `6ce5bf2` also
-contains the scanner-lifetime correction below. Its normal build
-[35503713472](https://github.com/michaelmazilu/kitbash/actions/runs/35503713472)
-is queued. The older queued run `35502199954` was cancelled before starting
-because this newer runtime revision supersedes it. Candidate run `35501459393`
+contains the scanner-lifetime correction below. `60805e0` additionally contains
+the finite-geometry correction. Its normal build
+[35504410903](https://github.com/michaelmazilu/kitbash/actions/runs/35504410903)
+is queued. The older queued runs `35502199954` and `35503713472` were cancelled
+before starting because newer runtime revisions superseded them. Candidate run `35501459393`
 lost communication with the Mac runner during setup; it did not complete Unity
 tests. These changes are not included in the last verified APK above, and their
 Mac gates remain pending.
