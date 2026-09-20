@@ -3,7 +3,7 @@ using UnityEngine;
 namespace CutOnce.Vision
 {
     /// <summary>
-    /// The scanner look: a translucent blue glow box on the object, and its name floating beside it.
+    /// Compact, sentence-case labels. Approximate detection boxes are an opt-in diagnostic.
     ///
     /// Reuses RoomSense's SheikahGlow material (loaded from Resources so the shader survives player
     /// build stripping — a shader only reached via Shader.Find can be dropped, giving a pink object
@@ -18,15 +18,17 @@ namespace CutOnce.Vision
         public Material glowMaterial;
         public Color highlightColour = new Color(0.25f, 0.75f, 1f, 0.55f);
         public Vector3 defaultSize = new Vector3(0.28f, 0.28f, 0.28f);
-        public float labelHeight = 0.16f;
-        public float labelSize = 0.02f;
+        public float labelHeight = 0.08f;
+        public float labelSize = 0.0035f;
         public bool showConfidence;
+        public bool showBounds;
 
         [Tooltip("How fast visuals catch up to the tracked position, in metres/second of lerp.")]
         public float followSpeed = 8f;
 
-        private class Cached { public Transform transform; public TextMesh text; public string lastName; }
+        private class Cached { public Transform transform; public TextMesh text, shadow; public string lastName; }
         private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _labels = new();
+        private Transform _camera;
 
         private static readonly int TintId = Shader.PropertyToID("_Tint");
         private static readonly int PulseRadiusId = Shader.PropertyToID("_PulseRadius");
@@ -42,6 +44,7 @@ namespace CutOnce.Vision
         public void Show(TrackedObject o)
         {
             if (o.visual == null) o.visual = Build(o);
+            if (!o.visual.activeSelf) o.visual.SetActive(true);
 
             var target = o.smoothedWorldPosition;
             var t = o.visual.transform;
@@ -62,22 +65,28 @@ namespace CutOnce.Vision
             if (cached.text != null && (showConfidence || cached.lastName != o.className))
             {
                 cached.text.text = showConfidence
-                    ? $"{o.className.ToUpperInvariant()}\n<size=10>{o.confidence * 100f:0}%</size>"
-                    : o.className.ToUpperInvariant();
+                    ? $"{o.className} · {o.confidence * 100f:0}%"
+                    : o.className;
                 cached.lastName = o.className;
+                if (cached.shadow != null) cached.shadow.text = cached.text.text;
             }
 
             // Billboard: face the headset, upright, so text is never mirrored or tilted.
-            var cam = Camera.main;
-            if (cam != null)
+            if (_camera == null && Camera.main != null) _camera = Camera.main.transform;
+            if (_camera != null)
             {
-                var away = label.position - cam.transform.position;
+                var away = label.position - _camera.position;
                 away.y = 0f;
                 if (away.sqrMagnitude > 0.0001f) label.rotation = Quaternion.LookRotation(away, Vector3.up);
             }
         }
 
         public void Hide(TrackedObject o)
+        {
+            if (o.visual != null && o.visual.activeSelf) o.visual.SetActive(false);
+        }
+
+        public void Release(TrackedObject o)
         {
             if (o.visual == null) return;
             _labels.Remove(o.visual);
@@ -90,25 +99,28 @@ namespace CutOnce.Vision
             var root = new GameObject($"[Vision] {o.className}");
             root.transform.position = o.smoothedWorldPosition;
 
-            var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            box.name = "Highlight";
-            box.transform.SetParent(root.transform, false);
-            box.transform.localScale = defaultSize;
-            // An overlay must never eat a controller ray or a physics query. Destroy() is deferred to
-            // end of frame, so disable first — otherwise the collider is live for one frame.
-            var collider = box.GetComponent<Collider>();
-            if (collider != null) { collider.enabled = false; Destroy(collider); }
-
-            var renderer = box.GetComponent<MeshRenderer>();
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-            if (glowMaterial != null)
+            if (showBounds && glowMaterial != null)
             {
-                renderer.sharedMaterial = glowMaterial;
-                var props = new MaterialPropertyBlock();
-                props.SetColor(TintId, highlightColour);
-                props.SetFloat(PulseRadiusId, 9999f);   // always visible; don't wait on RoomSense's pulse
-                renderer.SetPropertyBlock(props);
+                var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                box.name = "Highlight";
+                box.transform.SetParent(root.transform, false);
+                box.transform.localScale = defaultSize;
+                // An overlay must never eat a controller ray or a physics query. Destroy() is deferred to
+                // end of frame, so disable first — otherwise the collider is live for one frame.
+                var collider = box.GetComponent<Collider>();
+                if (collider != null) { collider.enabled = false; Destroy(collider); }
+
+                var renderer = box.GetComponent<MeshRenderer>();
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                if (glowMaterial != null)
+                {
+                    renderer.sharedMaterial = glowMaterial;
+                    var props = new MaterialPropertyBlock();
+                    props.SetColor(TintId, highlightColour);
+                    props.SetFloat(PulseRadiusId, 9999f);   // always visible; don't wait on RoomSense's pulse
+                    renderer.SetPropertyBlock(props);
+                }
             }
 
             var labelGo = new GameObject("Label");
@@ -116,13 +128,13 @@ namespace CutOnce.Vision
             labelGo.transform.localPosition = new Vector3(0f, labelHeight, 0f);
 
             var text = labelGo.AddComponent<TextMesh>();
-            text.text = o.className.ToUpperInvariant();
+            text.text = o.className;
             text.characterSize = labelSize;
-            text.fontSize = 96;
+            text.fontSize = 48;
             text.anchor = TextAnchor.LowerCenter;
             text.alignment = TextAlignment.Center;
-            text.richText = true;
-            text.color = new Color(0.7f, 0.95f, 1f, 1f);
+            text.richText = false;
+            text.color = new Color(0.94f, 0.96f, 0.95f, 1f);
 
             var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (font != null)
@@ -130,7 +142,24 @@ namespace CutOnce.Vision
                 text.font = font;
                 labelGo.GetComponent<MeshRenderer>().sharedMaterial = font.material;
             }
+            // A dark text silhouette keeps small labels readable on both white walls and dark furniture.
+            var shadowGo = new GameObject("Label contrast");
+            shadowGo.transform.SetParent(labelGo.transform, false);
+            shadowGo.transform.localPosition = new Vector3(0.0007f, -0.0007f, 0.0003f);
+            var shadow = shadowGo.AddComponent<TextMesh>();
+            shadow.text = text.text; shadow.font = text.font; shadow.fontSize = text.fontSize;
+            shadow.characterSize = text.characterSize; shadow.anchor = text.anchor;
+            shadow.alignment = text.alignment; shadow.richText = false;
+            shadow.color = new Color(0.02f, 0.03f, 0.03f, 1f);
+            shadowGo.GetComponent<MeshRenderer>().sharedMaterial = text.GetComponent<MeshRenderer>().sharedMaterial;
+            _labels[root] = new Cached { transform = labelGo.transform, text = text, shadow = shadow };
             return root;
+        }
+
+        private void OnDestroy()
+        {
+            foreach (var pair in _labels) if (pair.Key != null) Destroy(pair.Key);
+            _labels.Clear();
         }
     }
 }

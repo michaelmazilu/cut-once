@@ -6,20 +6,21 @@ using UnityEngine.UI;
 namespace CutOnce.UI
 {
     /// <summary>
-    /// The panel that stands behind the build: progress, the current step with its instruction and materials, what
-    /// is still to use, the part under the pointer, recent history, connection and alignment status, and toasts.
+    /// A compact task panel: current instruction, progress, connection and the part under the pointer.
+    /// Answers and temporary notices share the panel instead of floating above and below it.
     /// It is world-locked (a head-locked panel shakes on the cast) and built in code, so there is no prefab to break.
     /// All wording comes from Core.HudText.
     /// </summary>
     public sealed class HudController : MonoBehaviour
     {
-        const float Width = 640f, Height = 420f, MetresPerUnit = 0.001f;
-        static readonly Color Panel = new Color(0.04f, 0.07f, 0.10f, 0.78f), Ink = new Color(0.92f, 0.97f, 1f, 1f), Dim = new Color(0.62f, 0.75f, 0.82f, 1f),
-            Accent = new Color(0.13f, 0.83f, 0.93f, 1f), Warn = new Color(1f, 0.85f, 0.3f, 1f);
+        const float Width = 460f, Height = 124f, MetresPerUnit = 0.001f;
+        static readonly Color Panel = new Color(0.035f, 0.045f, 0.05f, 0.94f), Ink = new Color(0.92f, 0.97f, 1f, 1f), Dim = new Color(0.65f, 0.70f, 0.70f, 1f),
+            Accent = new Color(0.58f, 0.82f, 0.73f, 1f), Warn = new Color(1f, 0.85f, 0.3f, 1f);
 
-        Text _title, _progress, _stepTitle, _stepBody, _materials, _part, _history, _status, _toast, _answer, _copilot;
-        RectTransform _bar;
-        float _toastUntil;
+        Text _title, _progress, _stepTitle, _stepBody, _part, _status, _toast, _answer, _hint, _copilot;
+        RectTransform _bar, _barBack, _panel;
+        bool _hasBuild;
+        float _toastUntil, _answerUntil;
 
         public static HudController Create(Transform parent)
         {
@@ -35,20 +36,22 @@ namespace CutOnce.UI
 
         void Build(RectTransform root)
         {
-            Box(root, "panel", 0, 0, Width, Height, Panel);
-            _title = Label(root, "title", 20, 14, 400, 28, 20, Dim, TextAnchor.UpperLeft);
-            _status = Label(root, "status", 320, 14, 300, 28, 16, Dim, TextAnchor.UpperRight);
-            _progress = Label(root, "progress", 20, 44, 400, 40, 30, Ink, TextAnchor.UpperLeft);
-            Box(root, "bar back", 20, 92, Width - 40, 8, new Color(1, 1, 1, 0.12f));
-            _bar = Box(root, "bar", 20, 92, Width - 40, 8, Accent);
-            _stepTitle = Label(root, "step title", 20, 112, Width - 40, 28, 21, Accent, TextAnchor.UpperLeft);
-            _stepBody = Label(root, "step body", 20, 142, Width - 40, 78, 17, Ink, TextAnchor.UpperLeft);
-            _materials = Label(root, "materials", 20, 228, 290, 130, 15, Dim, TextAnchor.UpperLeft);
-            _part = Label(root, "part", 330, 228, 290, 130, 15, Ink, TextAnchor.UpperLeft);
-            _history = Label(root, "history", 20, 362, Width - 40, 50, 12, Dim, TextAnchor.LowerLeft);
-            _toast = Label(root, "toast", 20, -44, Width - 40, 36, 20, Warn, TextAnchor.MiddleCenter);
-            _copilot = Label(root, "copilot activity", 20, -82, Width - 40, 36, 22, Accent, TextAnchor.MiddleCenter);
-            _answer = Label(root, "answer", 20, Height + 8, Width - 40, 90, 17, Ink, TextAnchor.UpperLeft);
+            _panel = Box(root, "panel", 0, 0, Width, Height, Panel);
+            Box(root, "accent", 22, 20, 3, 14, Accent);
+            _title = Label(root, "title", 34, 18, Width - 56, 22, 15, Ink, TextAnchor.UpperLeft);
+            _title.text = "Cut Once";
+            _status = Label(root, "status", 22, 44, Width - 44, 20, 12, Dim, TextAnchor.UpperLeft);
+            _hint = Label(root, "hint", 22, 72, Width - 44, 40, 16, Ink, TextAnchor.UpperLeft);
+            _progress = Label(root, "progress", 22, 72, Width - 44, 24, 16, Dim, TextAnchor.UpperLeft);
+            _barBack = Box(root, "bar back", 22, 104, Width - 44, 2, new Color(1, 1, 1, 0.10f));
+            _bar = Box(root, "bar", 22, 104, Width - 44, 2, Accent);
+            _stepTitle = Label(root, "step title", 22, 122, Width - 44, 44, 19, Ink, TextAnchor.UpperLeft);
+            _stepBody = Label(root, "step body", 22, 170, Width - 44, 72, 16, Dim, TextAnchor.UpperLeft);
+            _part = Label(root, "part", 22, 250, Width - 44, 100, 14, Ink, TextAnchor.UpperLeft);
+            _copilot = Label(root, "copilot activity", 22, 0, Width - 44, 32, 16, Accent, TextAnchor.UpperLeft);
+            _toast = Label(root, "toast", 22, 0, Width - 44, 44, 14, Warn, TextAnchor.UpperLeft);
+            _answer = Label(root, "answer", 22, 0, Width - 44, 100, 16, Ink, TextAnchor.UpperLeft);
+            Layout();
         }
 
         // Layout is in panel units from the top-left corner, y down: the way a designer would sketch it.
@@ -81,18 +84,23 @@ namespace CutOnce.UI
         /// <param name="scaleLabel">"1:200" when a building is shown as a tabletop model; empty at full size.</param>
         public void ShowState(PlanDto plan, BuildStateDto state, List<MaterialLine> materials, IEnumerable<BuildEventDto> events, string scaleLabel = "")
         {
-            _title.text = string.IsNullOrEmpty(scaleLabel) ? $"{plan.name} · revision {plan.revision}" : $"{plan.name} · revision {plan.revision} · {scaleLabel}";
-            _progress.text = $"{HudText.Progress(state)}   <size=16>{HudText.TimeLeft(state)}</size>";
-            _bar.sizeDelta = new Vector2((Width - 40) * Mathf.Clamp01(state.progress.pct / 100f), 8);
+            _hasBuild = plan.parts.Count > 0;
+            _title.text = !_hasBuild ? "Cut Once" : string.IsNullOrEmpty(scaleLabel) ? plan.name : $"{plan.name} · {scaleLabel}";
+            _progress.text = $"{HudText.Progress(state)}   ·   {HudText.TimeLeft(state)}";
+            _bar.sizeDelta = new Vector2((Width - 44) * Mathf.Clamp01(state.progress.pct / 100f), 2);
             _stepTitle.text = HudText.StepTitle(plan, state);
             _stepBody.text = HudText.StepBody(plan, state);
-            _materials.text = HudText.Materials(materials);
-            _history.text = string.Join("\n", HudText.History(plan, events, state));
+            Layout();
         }
 
-        public void ShowPart(string card) => _part.text = card ?? "";
-        public void ShowStatus(string connection, string alignment) => _status.text = string.IsNullOrEmpty(alignment) ? connection : $"{connection} · {alignment}";
-        public void ShowAnswer(string text) => _answer.text = text ?? "";
+        public void ShowPart(string card) { _part.text = card ?? ""; Layout(); }
+        public void ShowStatus(string connection, string alignment)
+        {
+            _status.text = connection ?? "";
+            _hint.text = alignment ?? "";
+            Layout();
+        }
+        public void ShowAnswer(string text) { _answer.text = text ?? ""; _answerUntil = Time.time + 25f; Layout(); }
 
         public void ShowCopilotActivity(string activity)
         {
@@ -100,13 +108,66 @@ namespace CutOnce.UI
                           : activity == "thinking" ? "THINKING..."
                           : "";
             _copilot.color = activity == "thinking" ? Warn : Accent;
+            Layout();
         }
 
-        public void Toast(string text, float seconds = 3f) { _toast.text = text; _toastUntil = Time.time + seconds; }
+        public void Toast(string text, float seconds = 3f)
+        {
+            _toast.text = text; _toastUntil = Time.time + seconds; Layout();
+        }
+
+        // Only the active task and pointed part occupy space. No always-on inventory or event log.
+        // Text sizes stay fixed; the panel grows to fit its content instead of shrinking the font.
+        void Layout()
+        {
+            float y = 72;
+            _progress.gameObject.SetActive(_hasBuild);
+            _bar.gameObject.SetActive(_hasBuild);
+            _barBack.gameObject.SetActive(_hasBuild);
+            _stepTitle.gameObject.SetActive(_hasBuild);
+            _stepBody.gameObject.SetActive(_hasBuild);
+            if (_hasBuild)
+            {
+                y = 122;
+                Stack(_stepTitle, ref y, 26, 68);
+                Stack(_stepBody, ref y, 24, 160);
+            }
+            Stack(_copilot, ref y, 22, 36);
+            Stack(_hint, ref y, 22, 76);
+            // The answer temporarily takes the context slot; selecting a part still updates its card underneath.
+            if (!string.IsNullOrEmpty(_answer.text))
+            {
+                _part.gameObject.SetActive(false);
+                Stack(_answer, ref y, 36, 220);
+            }
+            else
+            {
+                _answer.gameObject.SetActive(false);
+                Stack(_part, ref y, 30, 112);
+            }
+            Stack(_toast, ref y, 22, 64);
+            float height = y + 14;
+            _panel.sizeDelta = new Vector2(Width, height);
+            ((RectTransform)transform).sizeDelta = new Vector2(Width, height);
+        }
+
+        static void Stack(Text text, ref float y, float minHeight, float maxHeight)
+        {
+            bool visible = !string.IsNullOrEmpty(text.text);
+            text.gameObject.SetActive(visible);
+            if (!visible) return;
+            float height = Mathf.Clamp(text.preferredHeight + 2, minHeight, maxHeight);
+            text.rectTransform.anchoredPosition = new Vector2(22, -y);
+            text.rectTransform.sizeDelta = new Vector2(Width - 44, height);
+            y += height + 10;
+        }
 
         void Update()
         {
-            if (_toast.text.Length > 0 && Time.time > _toastUntil) _toast.text = "";
+            bool changed = false;
+            if (_toast.text.Length > 0 && Time.time > _toastUntil) { _toast.text = ""; changed = true; }
+            if (_answer.text.Length > 0 && Time.time > _answerUntil) { _answer.text = ""; changed = true; }
+            if (changed) Layout();
             if (_copilot.text.Length > 0)
             {
                 var c = _copilot.color;
@@ -121,7 +182,7 @@ namespace CutOnce.UI
             forward.y = 0f;
             forward = forward.sqrMagnitude < 1e-4f ? Vector3.forward : forward.normalized;
             ((RectTransform)transform).pivot = new Vector2(0.5f, 0.5f);
-            transform.position = head + forward * 1.1f + Vector3.down * 0.25f;
+            transform.position = head + forward * 1.2f + Vector3.down * 0.35f;
             transform.rotation = Quaternion.LookRotation(forward, Vector3.up);
         }
 

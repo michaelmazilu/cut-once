@@ -45,13 +45,17 @@ namespace CutOnce.RoomSense
 
             var go = new GameObject("[RoomSense]");
             var glow = go.AddComponent<RoomGlow>();
+            // Keep scene understanding, but leave real surfaces clear in the everyday view.
+            // The RoomSense demo can still opt into its full-room scan effect.
+            glow.glowEverything = false;
+            glow.glowLabelledShapes = false;
+            glow.pulseEvery = 0f;
             glow.glowMaterial = Resources.Load<Material>(MaterialResource);
             if (glow.glowMaterial == null)
                 Debug.LogError($"[RoomSense] Resources/{MaterialResource}.mat is missing — nothing will render.");
-            go.AddComponent<GazeInspector>();
             Object.DontDestroyOnLoad(go);
 
-            Debug.Log("[RoomSense] installed: room glow + gaze inspector.");
+            Debug.Log("[RoomSense] installed: room geometry ready; ambient overlays off.");
             return go;
         }
     }

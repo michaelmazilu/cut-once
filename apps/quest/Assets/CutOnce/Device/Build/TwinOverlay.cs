@@ -28,6 +28,7 @@ namespace CutOnce.Device
             Clear();
             if (inventory?.twins == null) return;
             var named = _palette.StyleFor(new PartVisual { Base = BaseVisual.CURRENT_STEP });
+            named.grid = false; named.pulseHz = 0; named.fillAlpha = 0.04f; named.edgeAlpha = 0.45f;
             var unnamed = _palette.StyleFor(new PartVisual { Base = BaseVisual.FUTURE });
             foreach (var t in inventory.twins)
             {

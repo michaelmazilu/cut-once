@@ -135,14 +135,35 @@ namespace CutOnce.Vision
         }
 
         private bool _paused;
+        private UnityEngine.Camera _eye;
+        private TrackedObject _focused;
 
         private void Update()
         {
             if (_paused) return;
-            foreach (var o in Tracker.Prune(_removed)) Visualizer.Hide(o);
+            foreach (var o in Tracker.Prune(_removed)) Visualizer.Release(o);
+            if (_eye == null) _eye = UnityEngine.Camera.main;
+            TrackedObject focus = null;
+            float best = 0f;
+            if (_eye != null)
+            {
+                var head = _eye.transform;
+                foreach (var o in Tracker.Objects)
+                {
+                    if (!o.visible) continue;
+                    var offset = o.smoothedWorldPosition - head.position;
+                    float distance = offset.magnitude;
+                    if (distance < .2f || distance > 4f) continue;
+                    float facing = Vector3.Dot(head.forward, offset / distance);
+                    if (facing < .93f) continue; // about 22 degrees from where you are looking
+                    float score = facing + (o == _focused ? .025f : 0f); // don't flicker between neighbours
+                    if (score > best) { best = score; focus = o; }
+                }
+            }
+            _focused = focus;
             foreach (var o in Tracker.Objects)
             {
-                if (o.visible) Visualizer.Show(o);
+                if (o == focus) Visualizer.Show(o);
                 else Visualizer.Hide(o);
             }
         }
