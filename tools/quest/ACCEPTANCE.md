@@ -14,6 +14,13 @@ existing simulator-update warning. Verification ladder: steps 1–3 plus explici
 recorded-image/GPU fixtures; not a live simulator session or step 5 headset proof.
 The last Mac USB probe (`35499599170`) found no connected devices.
 
+Pending follow-up: `2f97de5` adds direct asynchronous camera snapshots and
+25 lifecycle regressions, plus sRGB/UNorm GPU snapshot checks. Its normal build
+[35502199954](https://github.com/michaelmazilu/kitbash/actions/runs/35502199954)
+is queued. The preceding candidate run `35501459393` lost communication with the
+Mac runner during setup; it did not complete Unity tests. These new changes are
+not included in the last verified APK above, and their Mac gates remain pending.
+
 | Requirement | Existing implementation / evidence | Remaining acceptance |
 | --- | --- | --- |
 | Identifies the object | Actual YOLO inference, 80 COCO class names; shipping FP32 weights pass the unchanged bottle/table photo tests | Test representative objects through the Quest camera. No claim to recognize every possible category. |

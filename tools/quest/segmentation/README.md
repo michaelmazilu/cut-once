@@ -124,3 +124,34 @@ metadata, per-eye world-point-to-captured-RGB projection, tracking and stale-mas
 rejection, moving-object/disocclusion handling, and real Quest memory/frame-time
 measurements. A passing pair of photographs cannot prove clean wrapping of every
 object or reconstruction of its unseen backside.
+
+## September 20 candidate results (not production)
+
+The manual tiny-model run
+[35501459393](https://github.com/michaelmazilu/kitbash/actions/runs/35501459393)
+at `dec4211` completed Linux export, its 14 tests, and numerical comparison.
+The Mac runner then lost communication during Quest setup; neither Unity backend
+comparison nor the nine new projection tests completed. No Unity pass or APK
+follows from this run. Its same-run candidate/report artifacts preserve the export.
+
+Local comparisons kept the original two photographs, .4 recognition confidence,
+.5 NMS, .4 bbox IoU and .5 mask IoU requirements:
+
+| Candidate | Actual semantic result | Decision |
+| --- | --- | --- |
+| RTMDet-Ins-tiny 320 / 640 | Both bottles and one table pass; photo 160012 table stays below confidence (.295 / .357) | Neither promoted. More resolution alone does not fix it. |
+| RTMDet-Ins-small 320 / 640 | Same missing table (.371 / .294); larger 43.14MB raw model. 640 also misses fixed numeric tolerances on several box distances. | Neither promoted. More parameters alone do not fix it. |
+| EfficientSAM ViT-tiny, prompted by actual accepted production-YOLO boxes | Bottles mask IoU .920 / .965; tables .150 / .491, both below .5. Model-predicted-IoU mask choice, never ground-truth selection. | Not promoted. Correct detector boxes do not guarantee correct semantic masks. |
+
+The EfficientSAM experiment used official source/weights at
+`yformer/EfficientSAM@d525f622e6f640acf5a0fc37c7ca1f243da5bde0`.
+A static two-corner decoder removed dynamic `If` and passed numeric comparisons
+for all ten real YOLO prompts; that establishes neither Unity import nor semantic
+success. Encoder plus decoder are approximately 41.2MB, and Linux CPU masking
+alone took 2.03–2.73 seconds/photo before YOLO. Those are explicitly not Quest
+timings. No ground-truth mask was used as a prompt, no failed object was omitted,
+and no alternate mask was chosen using ground-truth overlap.
+
+These failed alternatives remain experiments, not additional dependencies or
+weights in the app. Repeating their setup or relaxing the acceptance cutoff is
+not a fix for object-only highlighting.
