@@ -32,6 +32,22 @@ the opt-in native source-teardown stress probe have not run. The existing normal
 build does not automatically run that new PlayMode namespace. Neither authored
 tests nor code review establish successful native camera teardown on Quest.
 
+Additional local checks compile the seven snapshot/lifetime/projection sources
+and three associated test files against the installed exact Unity 6000.6.2f1
+managed CoreModule assemblies, with zero warnings/errors. This is an API-level
+compile, not a whole-project Unity build. Of 34 camera-state/scheduler tests,
+33 execute successfully in standalone .NET; the metadata/projection case cannot
+run there because Matrix4x4.TRS requires Unity native bindings. It remains a
+pending Unity test, not a passing or suppressed regression.
+
+The finite-geometry follow-up rejects NaN/infinite depth hits, invalid camera
+poses/rays, overflowed points and invalid sizes before publishing a location.
+The tracker rejects these observations before changing IDs, measurements or
+timestamps, and the scanner handles rejection explicitly. Valid origin and
+negative room coordinates remain allowed. Twenty-four added EditMode cases
+and the strengthened missing-camera assertion await the Mac; source review
+and whitespace checks alone do not satisfy the verification ladder.
+
 | Requirement | Existing implementation / evidence | Remaining acceptance |
 | --- | --- | --- |
 | Identifies the object | Actual YOLO inference, 80 COCO class names; shipping FP32 weights pass the unchanged bottle/table photo tests | Test representative objects through the Quest camera. No claim to recognize every possible category. |
@@ -103,3 +119,14 @@ end-to-end in Unity or on Quest, and is not included in the latest APK. Broader
 scenes, overlap ownership, native capture correspondence, memory and measured
 headset latency remain promotion gates. The recorded-photo preview is evidence
 of the experimental masks, not a screenshot of the final application.
+
+A single fixed-policy pixel-ownership trial assigned each overlapping positive
+mask pixel to the largest sigmoid(mask logit) times authoritative YOLO confidence
+(ties: original YOLO index). All ten detections participated with no threshold
+tuning or ground-truth selection. The unchanged four-target mask gate **failed
+2/4**: bottle IoUs .906591/.930775, table IoUs .262542/.494578. Table spill into
+matched detected-foreground annotations fell by 91.64%/91.55%, but 12,686/7,406
+pixels remained. The original COCO table annotations themselves overlap those
+foreground annotations by 114,053/90,818 pixels; neither the annotations nor the
+acceptance gate was changed. This trial is not promoted to runtime and does not
+establish exclusive visible-object coverage or handling of unknown objects.

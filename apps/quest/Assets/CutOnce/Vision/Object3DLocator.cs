@@ -109,11 +109,15 @@ namespace CutOnce.Vision
         public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world, out Vector3 size)
         {
             world = default;
-            size = new Vector3(0.25f, 0.25f, 0.25f);
+            size = default;
             LastAttempts++;
             var input = detection.inputSize;
             if (!TryGetVisibleBox(detection.boundingBox, input, out var box))
             { LastFailureReason = "invalid or off-image detection bounds"; return false; }
+            if (!Finite(cameraPose))
+            { LastFailureReason = "invalid captured camera pose"; return false; }
+            if (!Finite(minDistance) || !Finite(maxDistance) || minDistance <= 0f || maxDistance < minDistance)
+            { LastFailureReason = "invalid measured depth interval"; return false; }
             if (_camera == null || !_camera.IsReady)
             { LastFailureReason = "camera calibration/frame unavailable"; return false; }
 
@@ -126,6 +130,8 @@ namespace CutOnce.Vision
                 return false;
             }
             var centreRay = RayThrough(box.center, input, cameraPose);
+            if (!Finite(centreRay))
+            { LastFailureReason = "invalid calibrated detection ray"; return false; }
             var forward = cameraPose.rotation * Vector3.forward;
 
             _distances.Clear();
@@ -145,13 +151,13 @@ namespace CutOnce.Vision
                         box.yMin + box.height * Mathf.Lerp(inset, 1f - inset, t.y));
 
                     var ray = RayThrough(pixel, input, cameraPose);
+                    if (!Finite(ray)) continue;
                     if (!_raycast.Raycast(ray, out var hit, maxDistance)) continue;
                     if (hit.status != EnvironmentRaycastHitStatus.Hit) continue;
 
                     // Depth along the camera's forward axis — the one coordinate that is comparable
                     // between rays pointing in different directions.
-                    var depth = Vector3.Dot(hit.point - cameraPose.position, forward);
-                    if (depth < minDistance || depth > maxDistance) continue;
+                    if (!TryGetMeasuredDepth(hit.point, cameraPose, minDistance, maxDistance, out var depth)) continue;
                     _distances.Add(depth);
                 }
             }
@@ -169,9 +175,12 @@ namespace CutOnce.Vision
             // Convert that depth back into a distance along the centre ray. Guard the degenerate
             // case of a ray almost perpendicular to forward, where the division explodes.
             var cosine = Vector3.Dot(centreRay.direction, forward);
-            if (cosine < 0.1f) { LastFailureReason = "detection too far off-axis to place"; return false; }
-            world = centreRay.GetPoint(depthAt / cosine);
-            size = SizeAt(depthAt, box, input, cameraPose, detection.className);
+            if (!Finite(cosine) || cosine < 0.1f) { LastFailureReason = "detection too far off-axis to place"; return false; }
+            var measuredWorld = centreRay.GetPoint(depthAt / cosine);
+            if (!Finite(measuredWorld) || !TrySizeAt(depthAt, box, input, cameraPose, detection.className, out var measuredSize))
+            { LastFailureReason = "invalid measured object geometry"; return false; }
+            world = measuredWorld;
+            size = measuredSize;
             LastSuccesses++;
             LastFailureReason = "";
             return true;
@@ -194,35 +203,68 @@ namespace CutOnce.Vision
         }
 
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
+        private static bool Finite(Vector3 value) => Finite(value.x) && Finite(value.y) && Finite(value.z);
+        private static bool Finite(Pose pose)
+        {
+            var q = pose.rotation;
+            if (!Finite(pose.position) || !Finite(q.x) || !Finite(q.y) || !Finite(q.z) || !Finite(q.w)) return false;
+            var lengthSquared = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+            return Finite(lengthSquared) && lengthSquared > 1e-12f;
+        }
+        private static bool Finite(Ray ray)
+            => Finite(ray.origin) && Finite(ray.direction) && Finite(ray.direction.sqrMagnitude) && ray.direction.sqrMagnitude > 0f;
+
+        /// <summary>Admit only finite measured hits within the configured camera-forward depth interval.</summary>
+        public static bool TryGetMeasuredDepth(Vector3 hitPoint, Pose cameraPose, float minimum, float maximum, out float depth)
+        {
+            depth = default;
+            if (!Finite(hitPoint) || !Finite(cameraPose) || !Finite(minimum) || !Finite(maximum) ||
+                minimum <= 0f || maximum < minimum) return false;
+            var measured = Vector3.Dot(hitPoint - cameraPose.position, cameraPose.rotation * Vector3.forward);
+            // Ordered comparisons alone do not reject NaN: both < minimum and > maximum are false.
+            if (!Finite(measured) || measured < minimum || measured > maximum) return false;
+            depth = measured;
+            return true;
+        }
 
         /// <summary>
         /// Rays through all four edge midpoints intersect one camera-forward depth plane. Equal
         /// distances ALONG the four rays would instead measure on a sphere and shrink off-axis boxes.
         /// </summary>
-        private Vector3 SizeAt(float forwardDepth, Rect box, Vector2 inputSize, Pose cameraPose, string className)
+        private bool TrySizeAt(float forwardDepth, Rect box, Vector2 inputSize, Pose cameraPose, string className, out Vector3 size)
         {
+            size = default;
+            if (!Finite(minSizeM) || !Finite(maxSizeM) || minSizeM <= 0f || maxSizeM < minSizeM) return false;
             if (!TryPointAtForwardDepth(RayThrough(new Vector2(box.xMin, box.center.y), inputSize, cameraPose), cameraPose, forwardDepth, out var left)
                 || !TryPointAtForwardDepth(RayThrough(new Vector2(box.xMax, box.center.y), inputSize, cameraPose), cameraPose, forwardDepth, out var right)
                 || !TryPointAtForwardDepth(RayThrough(new Vector2(box.center.x, box.yMin), inputSize, cameraPose), cameraPose, forwardDepth, out var top)
                 || !TryPointAtForwardDepth(RayThrough(new Vector2(box.center.x, box.yMax), inputSize, cameraPose), cameraPose, forwardDepth, out var bottom))
-                return Vector3.one * minSizeM;
+                return false;
 
-            var cameraSize = EstimateCameraSize(Vector3.Distance(left, right), Vector3.Distance(top, bottom),
+            var width = Vector3.Distance(left, right);
+            var height = Vector3.Distance(top, bottom);
+            if (!Finite(width) || !Finite(height) || width <= 0f || height <= 0f) return false;
+            var cameraSize = EstimateCameraSize(width, height,
                 className, minSizeM, maxSizeM);
-            return WorldAlignedSize(cameraSize, cameraPose.rotation);
+            var measured = WorldAlignedSize(cameraSize, cameraPose.rotation);
+            if (!Finite(measured) || measured.x <= 0f || measured.y <= 0f || measured.z <= 0f) return false;
+            size = measured;
+            return true;
         }
 
         /// <summary>Intersect a ray with the plane that is forwardDepth metres in front of a captured camera.</summary>
         public static bool TryPointAtForwardDepth(Ray ray, Pose cameraPose, float forwardDepth, out Vector3 point)
         {
             point = default;
-            if (!(forwardDepth > 0f) || float.IsInfinity(forwardDepth)) return false;
+            if (!Finite(forwardDepth) || forwardDepth <= 0f || !Finite(cameraPose) || !Finite(ray)) return false;
             var forward = cameraPose.rotation * Vector3.forward;
             var cosine = Vector3.Dot(ray.direction, forward);
-            if (!(cosine > 0.1f)) return false;
+            if (!Finite(cosine) || !(cosine > 0.1f)) return false;
             var distance = (forwardDepth - Vector3.Dot(ray.origin - cameraPose.position, forward)) / cosine;
-            if (!(distance > 0f) || float.IsInfinity(distance)) return false;
-            point = ray.GetPoint(distance);
+            if (!Finite(distance) || distance <= 0f) return false;
+            var measured = ray.GetPoint(distance);
+            if (!Finite(measured)) return false;
+            point = measured;
             return true;
         }
 

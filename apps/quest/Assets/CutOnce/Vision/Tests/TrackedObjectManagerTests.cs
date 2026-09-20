@@ -108,6 +108,102 @@ namespace CutOnce.Vision.Tests
         }
 
         [Test]
+        public void InvalidGeometryDoesNotConsumeIdsAndLegacyPositionOverloadFailsClosed()
+        {
+            Assert.That(_tracker.Observe(Bottle, new Vector3(float.NaN, 0f, 0f)), Is.Null);
+            Assert.That(_tracker.Observe(Bottle, Vector3.zero, Vector3.zero), Is.Null);
+            Assert.That(_tracker.Objects, Is.Empty);
+
+            var first = _tracker.Observe(Bottle, Vector3.zero);
+            Assert.That(first.id, Is.EqualTo(1));
+            Assert.That(first.worldPosition, Is.EqualTo(Vector3.zero), "The room origin is a valid position.");
+            var second = _tracker.Observe(Bottle, new Vector3(-3f, -1f, -2f), BottleSize);
+            Assert.That(second.id, Is.EqualTo(2));
+            Assert.That(second.worldPosition, Is.EqualTo(new Vector3(-3f, -1f, -2f)), "Negative world coordinates are valid.");
+        }
+
+        [TestCase(float.NaN)]
+        [TestCase(float.PositiveInfinity)]
+        [TestCase(float.NegativeInfinity)]
+        public void NonfinitePositionCannotPoisonOrRefreshAnySameClassTrack(float invalid)
+        {
+            for (var axis = 0; axis < 3; axis++)
+            {
+                var world = new Vector3(0f, 1f, 2f);
+                world[axis] = invalid;
+                AssertInvalidGeometryLeavesTracksUntouched(world, BottleSize);
+            }
+            Assert.That(_tracker.Observe(Bottle, Vector3.right * 10f, BottleSize).id, Is.EqualTo(3),
+                "Rejected positions must not consume IDs even when tracks already exist.");
+        }
+
+        [TestCase(float.NaN)]
+        [TestCase(float.PositiveInfinity)]
+        [TestCase(float.NegativeInfinity)]
+        [TestCase(0f)]
+        [TestCase(-.1f)]
+        public void InvalidSizeCannotPoisonOrRefreshAnySameClassTrack(float invalid)
+        {
+            for (var axis = 0; axis < 3; axis++)
+            {
+                var size = BottleSize;
+                size[axis] = invalid;
+                AssertInvalidGeometryLeavesTracksUntouched(new Vector3(0f, 1f, 2f), size);
+            }
+            Assert.That(_tracker.Observe(Bottle, Vector3.right * 10f, BottleSize).id, Is.EqualTo(3),
+                "Rejected sizes must not consume IDs even when tracks already exist.");
+        }
+
+        private void AssertInvalidGeometryLeavesTracksUntouched(Vector3 world, Vector3 size)
+        {
+            // One tracker is reused across all invalid components. Both potential associations
+            // stay eligible, so a NaN comparison cannot hide behind the observed-ID exclusion.
+            if (_tracker.Objects.Count == 0)
+            {
+                _tracker.Observe(Bottle, new Vector3(0f, 1f, 2f), BottleSize);
+                _tracker.Observe(Bottle, new Vector3(3f, 1f, 2f), BottleSize);
+                foreach (var tracked in _tracker.Objects)
+                {
+                    tracked.lastSeenTime = -10f;
+                    tracked.lastAcquiredAtRealtimeSeconds = 123d;
+                }
+                _observed.Add(99);
+            }
+            var badMeasurement = new DetectedObject { classId = 39, className = "untrusted", confidence = 1f };
+            Assert.That(_tracker.Observe(badMeasurement, world, size, _observed,
+                new DetectionFrameTiming(124d)), Is.Null);
+            Assert.That(_tracker.Objects, Has.Count.EqualTo(2));
+            Assert.That(_observed, Is.EquivalentTo(new[] { 99 }));
+            for (var index = 0; index < _tracker.Objects.Count; index++)
+            {
+                var tracked = _tracker.Objects[index];
+                Assert.That(tracked.id, Is.EqualTo(index + 1));
+                Assert.That(tracked.worldPosition, Is.EqualTo(new Vector3(index * 3f, 1f, 2f)));
+                Assert.That(tracked.smoothedWorldPosition, Is.EqualTo(tracked.worldPosition));
+                Assert.That(tracked.worldSize, Is.EqualTo(BottleSize));
+                Assert.That(tracked.smoothedWorldSize, Is.EqualTo(BottleSize));
+                Assert.That(tracked.className, Is.EqualTo("bottle"));
+                Assert.That(tracked.confidence, Is.EqualTo(Bottle.confidence));
+                Assert.That(tracked.totalHits, Is.EqualTo(1));
+                Assert.That(tracked.consecutiveHits, Is.EqualTo(1));
+                Assert.That(tracked.visible, Is.False);
+                Assert.That(tracked.lastSeenTime, Is.EqualTo(-10f));
+                Assert.That(tracked.lastAcquiredAtRealtimeSeconds, Is.EqualTo(123d));
+            }
+        }
+
+        [Test]
+        public void NonfiniteStoredPositionIsNotTreatedAsAnInRangeAssociation()
+        {
+            var corrupted = _tracker.Observe(Bottle, Vector3.zero, BottleSize);
+            corrupted.smoothedWorldPosition = new Vector3(float.NaN, 0f, 0f);
+            var valid = _tracker.Observe(Bottle, new Vector3(0f, 1f, 2f), BottleSize);
+            Assert.That(valid, Is.Not.SameAs(corrupted));
+            Assert.That(valid.id, Is.EqualTo(2));
+            Assert.That(corrupted.totalHits, Is.EqualTo(1));
+        }
+
+        [Test]
         public void RejectedJumpDoesNotConfirmOrRefreshAnyAcceptedMeasurement()
         {
             _tracker.associationDistance = 0.75f; // The jump gate must be inside association reach.

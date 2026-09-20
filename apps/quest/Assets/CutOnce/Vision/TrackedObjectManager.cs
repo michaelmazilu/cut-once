@@ -69,11 +69,11 @@ namespace CutOnce.Vision
         private readonly List<TrackedObject> _objects = new();
         private int _nextId = 1;
 
-        /// <summary>Older callers and diagnostics: position only, a box-ish default size.</summary>
+        /// <summary>Older callers and diagnostics: position only, a box-ish default size. Null for invalid geometry.</summary>
         public TrackedObject Observe(in DetectedObject detection, Vector3 world)
             => Observe(detection, world, new Vector3(0.25f, 0.25f, 0.25f));
 
-        /// <summary>Fold one located detection into the tracked set.</summary>
+        /// <summary>Fold one located detection into the tracked set, or return null for invalid geometry.</summary>
         public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize)
             => Observe(detection, world, worldSize, null);
 
@@ -83,10 +83,16 @@ namespace CutOnce.Vision
         /// within the association radius can both update one track and one physical object vanishes.
         /// Input detections must already be de-duplicated by NMS; this is one-to-one spatial tracking,
         /// not a second object detector or proof that overlapping detections are distinct objects.
+        /// Returns null without changing tracks or consuming an ID if position/size is nonfinite
+        /// or any size component is nonpositive. Only add a nonnull result's ID to the observed set.
         /// </summary>
         public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize, ISet<int> observedIds,
             DetectionFrameTiming frameTiming = default)
         {
+            // NaN distances otherwise compare as if in range and overwrite an arbitrary track.
+            // Zero/negative world coordinates are valid; sizes must be strictly positive.
+            if (!Finite(world) || !Finite(worldSize) || worldSize.x <= 0f || worldSize.y <= 0f || worldSize.z <= 0f)
+                return null;
             var now = Time.time;
             var match = FindNearest(detection.classId, world, observedIds);
 
@@ -185,11 +191,16 @@ namespace CutOnce.Vision
                 if (o.classId != classId) continue;
                 if (observedIds != null && observedIds.Contains(o.id)) continue;
                 var d = Vector3.Distance(o.smoothedWorldPosition, world);
-                if (d > bestDistance) continue;
+                if (float.IsNaN(d) || float.IsInfinity(d) || d > bestDistance) continue;
                 bestDistance = d;
                 best = o;
             }
             return best;
         }
+
+        private static bool Finite(Vector3 value)
+            => !float.IsNaN(value.x) && !float.IsInfinity(value.x) &&
+               !float.IsNaN(value.y) && !float.IsInfinity(value.y) &&
+               !float.IsNaN(value.z) && !float.IsInfinity(value.z);
     }
 }

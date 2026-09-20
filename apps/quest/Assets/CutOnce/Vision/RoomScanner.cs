@@ -109,8 +109,9 @@ namespace CutOnce.Vision
                 if (d.confidence < minConfidence) continue;
                 if (!Locator.TryLocate(d, cameraPose, out var world, out var worldSize)) continue;
 
-                located++;
                 var tracked = Tracker.Observe(d, world, worldSize, _observed, frameTiming);
+                if (tracked == null) continue; // Invalid geometry cannot reserve or refresh a track.
+                located++;
                 _observed.Add(tracked.id);
 
                 if (shouldLog) Debug.Log($"Detected: {d.className} {d.confidence:0.00}  @ {world}");
