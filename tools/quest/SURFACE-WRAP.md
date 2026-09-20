@@ -18,9 +18,12 @@ This policy applies to both existing and later-created RoomSense components.
 The bundled model has 80 COCO categories. Its legacy `diningtable` label is shown
 as `dining table`; a water bottle is identified as `bottle`, not a particular
 brand or its contents. No class outside that vocabulary is promised. Detection
-batches are NMS-filtered, then associated one-to-one with nearby same-class
+batches are NMS-filtered within each class, then associated one-to-one with nearby same-class
 tracks so two nearby bottles do not update the same identity. This does not
 guarantee identity across class changes, long absences, or crossing objects.
+Different classes can overlap: an object on a table must not suppress the table
+just because their image boxes overlap. Conflicting class predictions for one
+physical object can still coexist; NMS alone is not semantic identity tracking.
 
 ## What the evidence means
 
@@ -54,6 +57,13 @@ tables. It repeats each inference three times at the unchanged 0.35 detector /
 the dataset's annotated boxes, and checks a blank negative control. The rendered
 diagnostic boxes show actual detector coordinates; they are not the headset UI.
 Results and annotated photos are in `Logs/cli/recognition-proof`.
+
+The report separately records the first blank-image cold start, including any
+frame discarded by the production timeout, and requires scanning to recover
+for all measured photos. A numeric GPU preprocessing check tests RGB ordering,
+image orientation and encoded mid-gray values. Optional pre-NMS class scores
+explain low-confidence misses without changing the acceptance thresholds;
+this extra diagnostic pass is disabled in the normal headset pipeline.
 
 The bundled Meta model already converts its output to `(x1,y1,x2,y2)` corners;
 decoding it again as centre/size misplaces the depth rays. `cornerBoxes` therefore

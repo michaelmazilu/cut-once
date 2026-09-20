@@ -49,5 +49,38 @@ namespace CutOnce.Vision.Tests
             Assert.That(YoloDetector.DecodeModelBox(raw, corners: false),
                 Is.EqualTo(new Vector4(270f, 100f, 370f, 500f)));
         }
+
+        [Test]
+        public void PizzaOnTableDoesNotSuppressTheRecognizedTable()
+        {
+            // Recorded COCO fixture 160012: different physical objects with box IoU about .689.
+            var table = new Vector4(3.27f, 157.75f, 638.64f, 454.19f);
+            var pizza = new Vector4(99.79f, 200.49f, 620.45f, 460.82f);
+            Assert.That(YoloDetector.ShouldSuppressDetection(53, pizza, 60, table, .5f), Is.False);
+            Assert.That(YoloDetector.ShouldSuppressDetection(60, table, 53, pizza, .5f), Is.False);
+        }
+
+        [Test]
+        public void DuplicateBoxesOfTheSameClassAreStillSuppressed()
+        {
+            var kept = new Vector4(100f, 100f, 400f, 400f);
+            var duplicate = new Vector4(105f, 105f, 395f, 395f);
+            Assert.That(YoloDetector.ShouldSuppressDetection(60, kept, 60, duplicate, .5f), Is.True);
+        }
+
+        [Test]
+        public void SeparateObjectsOfTheSameClassRemainSeparate()
+        {
+            var bottle = new Vector4(100f, 100f, 150f, 300f);
+            var otherBottle = new Vector4(160f, 100f, 210f, 300f);
+            Assert.That(YoloDetector.ShouldSuppressDetection(39, bottle, 39, otherBottle, .5f), Is.False);
+        }
+
+        [Test]
+        public void EvenIdenticalBoxesDoNotEraseDifferentClasses()
+        {
+            var box = new Vector4(100f, 100f, 400f, 400f);
+            Assert.That(YoloDetector.ShouldSuppressDetection(53, box, 60, box, .5f), Is.False);
+        }
     }
 }

@@ -9,17 +9,20 @@ namespace CutOnce.Vision
 {
     /// <summary>
     /// YOLOv9 on the passthrough camera, adapted from Meta's MultiObjectDetection sample
-    /// (SentisInferenceRunManager). Same model, same package, same async shape — the parts kept
-    /// verbatim are the ones that are easy to get subtly wrong: the tensor layout, the readback
-    /// pattern, and the NMS.
+    /// (SentisInferenceRunManager). The same converted model and tensor layout are used; output
+    /// readback is guarded against failures and stalls, and NMS keeps overlapping different classes.
     ///
-    /// Two deliberate departures from the sample:
+    /// Deliberate departures from the sample:
     ///  - its RunInference() opens with a local DllImport of ovrp_GetNodePoseStateAtTime, an
     ///    undocumented P/Invoke into OVRPlugin, purely to decide whether the camera pose is
     ///    trustworthy. We skip frames using the camera's own IsUpdatedThisFrame instead, which is
     ///    public API and tells us the same thing for our purposes.
     ///  - the sample drives a world-space uGUI canvas; we raise an event and let the rest of the
     ///    pipeline decide what to do with it.
+    ///  - the sample suppresses boxes across classes. We suppress duplicates within a class so a
+    ///    recognized table and an object on the table can both survive.
+    ///  - readback requests are polled before creating CPU clones, and a stalled request is drained
+    ///    before the same worker can process another frame.
     ///
     /// Output readback is polled across frames with `yield return null` until it completes.
     /// Preprocessing, initial model warm-up and layer scheduling still need headset frame-time
@@ -46,6 +49,9 @@ namespace CutOnce.Vision
         [Tooltip("The bundled Meta YOLO model already outputs corners (x1,y1,x2,y2). Turn off only for a replacement model that outputs centre+size.")]
         public bool cornerBoxes = true;
 
+        [Tooltip("Diagnostic-only extra pass over raw model outputs. Leave off on the headset; recorded-photo proof enables it to explain missing classes.")]
+        public bool collectRawClassSummaries;
+
         /// <summary>No inference while this is set; the loop keeps waiting, so it can be turned back on.</summary>
         public bool Paused { get; set; }
 
@@ -64,6 +70,30 @@ namespace CutOnce.Vision
         public int TotalInferences { get; private set; }
         public string LastError { get; private set; } = "";
 
+        /// <summary>
+        /// Scores from the model head before thresholding or NMS. The converted model retains only
+        /// the winning class for each anchor, so these are not the other 79 class logits per anchor.
+        /// A copy is returned per list item; callers cannot change the detector's stored summaries.
+        /// </summary>
+        public readonly struct RawClassSummary
+        {
+            public readonly int classId, candidateCount, aboveThreshold;
+            public readonly string className;
+            public readonly float maxScore;
+
+            public RawClassSummary(int classId, string className, int candidateCount, int aboveThreshold, float maxScore)
+            {
+                this.classId = classId;
+                this.className = className;
+                this.candidateCount = candidateCount;
+                this.aboveThreshold = aboveThreshold;
+                this.maxScore = maxScore;
+            }
+        }
+
+        public IReadOnlyList<RawClassSummary> LastRawClassSummaries => _rawClassSummaries;
+        public float LastRawClassThreshold { get; private set; }
+
         private Worker _worker;
         private Tensor<float> _input;
         private Vector2Int _inputSize;
@@ -73,6 +103,7 @@ namespace CutOnce.Vision
         private readonly List<DetectedObject> _detections = new();
         private float _lastInferenceStartedAt = -999f;
         private float _emaFps;
+        private RawClassSummary[] _rawClassSummaries = Array.Empty<RawClassSummary>();
 
         private void Awake()
         {
@@ -95,6 +126,7 @@ namespace CutOnce.Vision
 
             _labels = labelsAsset.text.Split('\n');
             for (var i = 0; i < _labels.Length; i++) _labels[i] = NormalizeClassName(_labels[i]);
+            _rawClassSummaries = new RawClassSummary[_labels.Length];
 
             try
             {
@@ -222,6 +254,7 @@ namespace CutOnce.Vision
             try
             {
                 LastRawDetections = scores.shape.length;
+                if (collectRawClassSummaries) SummarizeRawClasses(classIds, scores);
                 if (!_loggedRawBox && scores.shape.length > 0)
                 {
                     _loggedRawBox = true;                                    // one line, so the log settles the layout on a real device
@@ -339,7 +372,30 @@ namespace CutOnce.Vision
             Debug.LogError("[Vision] " + reason);
         }
 
-        /// <summary>Ported from Meta's sample: score filter, sort, suppress by IoU regardless of class.</summary>
+        private void SummarizeRawClasses(Tensor<int> classIds, Tensor<float> scores)
+        {
+            LastRawClassThreshold = scoreThreshold;
+            for (var i = 0; i < _rawClassSummaries.Length; i++)
+                _rawClassSummaries[i] = new RawClassSummary(i, ClassName(i), 0, 0, 0f);
+
+            var scoreArray = scores.AsReadOnlyNativeArray();
+            for (var i = 0; i < scoreArray.Length; i++)
+            {
+                var classId = classIds[i];
+                if (classId < 0 || classId >= _rawClassSummaries.Length) continue;
+                var previous = _rawClassSummaries[classId];
+                var score = scoreArray[i];
+                _rawClassSummaries[classId] = new RawClassSummary(classId, previous.className,
+                    previous.candidateCount + 1, previous.aboveThreshold + (score >= scoreThreshold ? 1 : 0),
+                    Mathf.Max(previous.maxScore, score));
+            }
+        }
+
+        /// <summary>
+        /// Score filter, sort, then suppress duplicate boxes of the SAME class. Meta's sample uses
+        /// class-agnostic suppression; that would erase a table whenever an object on it overlaps
+        /// enough (for example, a large pizza), although both are independently recognized objects.
+        /// </summary>
         private static void NonMaxSuppression(List<(int classId, Vector4 box, float score)> results, Tensor<float> boxes,
             Tensor<int> classIds, Tensor<float> scores, float iouThreshold, float scoreThreshold, bool cornerBoxes)
         {
@@ -363,7 +419,9 @@ namespace CutOnce.Vision
                 for (var j = i + 1; j < candidates.Count; j++)
                 {
                     if (suppressed[j]) continue;
-                    if (IoU(Box(idx), Box(candidates[j])) > iouThreshold) suppressed[j] = true;
+                    var other = candidates[j];
+                    if (ShouldSuppressDetection(classIds[idx], Box(idx), classIds[other], Box(other), iouThreshold))
+                        suppressed[j] = true;
                 }
             }
 
@@ -381,6 +439,11 @@ namespace CutOnce.Vision
         public static Vector4 DecodeModelBox(Vector4 raw, bool corners = true)
             => corners ? raw : new Vector4(raw.x - raw.z * 0.5f, raw.y - raw.w * 0.5f,
                 raw.x + raw.z * 0.5f, raw.y + raw.w * 0.5f);
+
+        /// <summary>Different object classes may overlap without being duplicate detections.</summary>
+        public static bool ShouldSuppressDetection(int keptClassId, Vector4 keptBox,
+            int candidateClassId, Vector4 candidateBox, float iouThreshold)
+            => keptClassId == candidateClassId && IoU(keptBox, candidateBox) > iouThreshold;
 
         private static float IoU(Vector4 a, Vector4 b)
         {

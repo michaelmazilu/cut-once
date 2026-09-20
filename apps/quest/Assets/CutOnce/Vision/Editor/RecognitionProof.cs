@@ -52,6 +52,10 @@ namespace CutOnce.Vision.Editor
             public int repeats = Repeats;
             public bool passed;
             public string error;
+            public string warmupPolicy = "One explicit blank production inference before measured photos. A cold-start frame discarded by the unchanged 8-second production timeout is reported, not hidden; all subsequent photo inferences must deliver valid output.";
+            public InferenceResult coldStartWarmup;
+            public bool recoveredAfterWarmup;
+            public PreprocessingResult preprocessing;
             public List<PhotoResult> photos = new List<PhotoResult>();
             public InferenceResult blankNegativeControl;
             public bool blankNegativeControlPassed;
@@ -72,10 +76,34 @@ namespace CutOnce.Vision.Editor
         {
             public int iteration, rawCandidates;
             public float milliseconds;
+            public float wallClockMilliseconds;
+            public bool eventDelivered, timeoutDiscarded;
             public bool passed;
             public string error;
             public List<DetectionResult> detections = new List<DetectionResult>();
             public List<GroundTruthMatch> groundTruthMatches = new List<GroundTruthMatch>();
+            public string rawClassSummaryScope = "Winning-class candidates before confidence filtering and NMS; the exported graph retains one ArgMax class per anchor, not every class logit.";
+            public float rawClassThreshold;
+            public List<RawClassResult> rawClasses = new List<RawClassResult>();
+        }
+
+        [Serializable]
+        private sealed class PreprocessingResult
+        {
+            public string scope = "Actual TextureConverter defaults used by production, on a 2x2 exact-size sRGB test texture (not the model's resized photo path). Checks NCHW RGB channels, top-left tensor origin, and encoded gray 128/255 instead of linear-light 0.216.";
+            public string textureFormat;
+            public float[] expected, actual;
+            public float tolerance = .01f;
+            public bool passed;
+        }
+
+        [Serializable]
+        private sealed class RawClassResult
+        {
+            public int classId;
+            public string className;
+            public float maxScore;
+            public int aboveThreshold, candidateCount;
         }
 
         [Serializable]
@@ -161,6 +189,7 @@ namespace CutOnce.Vision.Editor
                 _detector.modelAsset = Resources.Load<ModelAsset>(RoomScannerBootstrap.ModelResource);
                 _detector.labelsAsset = Resources.Load<TextAsset>(RoomScannerBootstrap.LabelsResource);
                 _detector.backend = BackendType.CPU;
+                _detector.collectRawClassSummaries = true; // Diagnostics only; no thresholds or model output are changed.
                 // Assert the actual defaults instead of changing the model's operating point to make a test pass.
                 if (Mathf.Abs(_detector.scoreThreshold - DetectorConfidence) > .0001f)
                     throw new InvalidOperationException("Production detector confidence changed; update this proof explicitly before comparing results.");
@@ -182,6 +211,17 @@ namespace CutOnce.Vision.Editor
 
         private static IEnumerator Body(string[] paths, string[] expectationGroups)
         {
+            yield return CheckPreprocessing();
+            var blank = new Texture2D(640, 640, TextureFormat.RGBA32, false);
+            Owned.Add(blank);
+            var gray = new Color32[640 * 640];
+            for (var pixel = 0; pixel < gray.Length; pixel++) gray[pixel] = new Color32(128, 128, 128, 255);
+            blank.SetPixels32(gray);
+            blank.Apply(false, false);
+            yield return Infer(blank, 0, value => _report.coldStartWarmup = value);
+            Debug.Log($"[Recognition proof] Explicit cold-start blank warmup: {_report.coldStartWarmup.wallClockMilliseconds:0.0} ms; " +
+                $"event={_report.coldStartWarmup.eventDelivered}, timeoutDiscarded={_report.coldStartWarmup.timeoutDiscarded}, error={_report.coldStartWarmup.error}");
+
             for (var photoIndex = 0; photoIndex < paths.Length; photoIndex++)
             {
                 var path = Path.GetFullPath(paths[photoIndex].Trim());
@@ -232,25 +272,66 @@ namespace CutOnce.Vision.Editor
 
             // A real negative control, not a substituted detector response. It uses exactly the same
             // preprocessing/model/decode path and reports any actual output, including false positives.
-            var blank = new Texture2D(640, 640, TextureFormat.RGBA32, false);
-            Owned.Add(blank);
-            var gray = new Color32[640 * 640];
-            for (var pixel = 0; pixel < gray.Length; pixel++) gray[pixel] = new Color32(128, 128, 128, 255);
-            blank.SetPixels32(gray);
-            blank.Apply(false, false);
             yield return Infer(blank, 1, value => _report.blankNegativeControl = value);
             foreach (var detection in _report.blankNegativeControl.detections)
                 if (detection.acceptedByScanner)
                     Reject(_report.blankNegativeControl, "Blank negative control falsely detected '" + detection.name + "'.");
             _report.blankNegativeControlPassed = _report.blankNegativeControl.passed;
             WriteAnnotated(blank, _report.blankNegativeControl, Path.Combine(_directory, "blank-negative-control.png"));
-            _report.passed = _report.photos.TrueForAll(photo => photo.passed) && _report.blankNegativeControlPassed;
+            _report.recoveredAfterWarmup = _report.photos.TrueForAll(photo => photo.inferences.TrueForAll(inference => inference.eventDelivered)) &&
+                _report.blankNegativeControl.eventDelivered && !_detector.InferenceRunning;
+            var warmupAcceptable = _report.coldStartWarmup.passed || _report.coldStartWarmup.timeoutDiscarded;
+            _report.passed = _report.preprocessing.passed && warmupAcceptable && _report.recoveredAfterWarmup &&
+                _report.photos.TrueForAll(photo => photo.passed) && _report.blankNegativeControlPassed;
             if (!_report.passed) _report.error = "At least one actual model-output assertion failed; inspect photo inferences and the negative control.";
+        }
+
+        private static IEnumerator CheckPreprocessing()
+        {
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            Owned.Add(texture);
+            texture.SetPixels32(new[]
+            {
+                new Color32(0, 0, 255, 255), new Color32(128, 128, 128, 255), // Unity's first row is bottom-left.
+                new Color32(255, 0, 0, 255), new Color32(0, 255, 0, 255),
+            });
+            texture.Apply(false, false);
+            var gray = 128f / 255f;
+            _report.preprocessing = new PreprocessingResult
+            {
+                textureFormat = texture.graphicsFormat.ToString(),
+                expected = new[] { 1f, 0f, 0f, gray, 0f, 1f, 0f, gray, 0f, 0f, 1f, gray },
+                actual = new float[12],
+            };
+            using (var input = new Tensor<float>(new TensorShape(1, 3, 2, 2)))
+            {
+                TextureConverter.ToTensor(texture, input, new TextureTransform().SetDimensions(2, 2, 3));
+                var readback = input.ReadbackAndCloneAsync().GetAwaiter();
+                var deadline = EditorApplication.timeSinceStartup + InferenceDeadlineSeconds;
+                while (!readback.IsCompleted)
+                {
+                    if (EditorApplication.timeSinceStartup > deadline) throw new TimeoutException("Known-pixel preprocessing readback did not complete.");
+                    yield return null;
+                }
+                using (var pixels = readback.GetResult())
+                {
+                    _report.preprocessing.passed = true;
+                    for (var index = 0; index < _report.preprocessing.actual.Length; index++)
+                    {
+                        var value = pixels[index];
+                        _report.preprocessing.actual[index] = value;
+                        if (!Finite(value) || Mathf.Abs(value - _report.preprocessing.expected[index]) > _report.preprocessing.tolerance)
+                            _report.preprocessing.passed = false;
+                    }
+                }
+            }
+            Debug.Log("[Recognition proof] Actual RGB/gray preprocessing check: " + (_report.preprocessing.passed ? "PASS" : "FAIL"));
         }
 
         private static IEnumerator Infer(Texture photo, int iteration, Action<InferenceResult> done)
         {
             var result = new InferenceResult { iteration = iteration, passed = true };
+            var startedAt = EditorApplication.timeSinceStartup;
             var delivered = false;
             void Capture(List<DetectedObject> detections, Pose pose, Vector2 inputSize)
             {
@@ -287,6 +368,20 @@ namespace CutOnce.Vision.Editor
                 yield return _detector.DetectOnce(photo, new Pose(Vector3.zero, Quaternion.identity));
                 result.rawCandidates = _detector.LastRawDetections;
                 result.milliseconds = _detector.LastInferenceMs;
+                result.wallClockMilliseconds = (float)((EditorApplication.timeSinceStartup - startedAt) * 1000);
+                result.eventDelivered = delivered;
+                result.timeoutDiscarded = !delivered && !_detector.InferenceRunning &&
+                    _detector.LastError.StartsWith("inference readback stalled", StringComparison.Ordinal);
+                if (delivered)
+                {
+                    result.rawClassThreshold = _detector.LastRawClassThreshold;
+                    foreach (var summary in _detector.LastRawClassSummaries)
+                        result.rawClasses.Add(new RawClassResult
+                        {
+                            classId = summary.classId, className = summary.className, maxScore = summary.maxScore,
+                            aboveThreshold = summary.aboveThreshold, candidateCount = summary.candidateCount,
+                        });
+                }
                 if (!delivered) Reject(result, "Production detector did not emit a detection event: " + _detector.LastError);
                 if (!string.IsNullOrEmpty(_detector.LastError)) Reject(result, _detector.LastError);
             }
