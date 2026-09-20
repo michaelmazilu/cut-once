@@ -32,6 +32,15 @@ namespace CutOnce.QuestTools
         public const string XRSettingsPath = "Assets/XR/XRGeneralSettingsPerBuildTarget.asset";
         public const string OpenXRLoader = "UnityEngine.XR.OpenXR.OpenXRLoader";
         public const string MetaXRFeature = "Meta.XR.MetaXRFeature";
+        /// <summary>
+        /// Unity's OpenXR Meta package (com.unity.xr.meta-openxr). Its Occlusion feature is what gives the Meta XR SDK's
+        /// EnvironmentDepthManager a depth TEXTURE provider under the OpenXR loader: the object highlight's surface paint
+        /// needs it. (Depth RAYS — the object locator, Kit's table scan — go through EnvironmentRaycastManager's own
+        /// OpenXR provider and work without it.) Occlusion's validation rule requires the Session feature. Matched by
+        /// name so this compiles before the package has resolved.
+        /// </summary>
+        public const string MetaOpenXRSessionFeature = "UnityEngine.XR.OpenXR.Features.Meta.ARSessionFeature";
+        public const string MetaOpenXROcclusionFeature = "UnityEngine.XR.OpenXR.Features.Meta.AROcclusionFeature";
         internal const string Quest3ManifestName = "eureka"; // Quest 3's name in the Android manifest
 
         [MenuItem("Cut Once/Apply Quest 3 settings", priority = 1)]
@@ -146,7 +155,10 @@ namespace CutOnce.QuestTools
             openxr.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
             foreach (var feature in openxr.GetFeatures())
             {
-                if (feature.GetType().FullName == MetaXRFeature
+                var fullName = feature.GetType().FullName;
+                if (fullName == MetaXRFeature
+                    || fullName == MetaOpenXRSessionFeature
+                    || fullName == MetaOpenXROcclusionFeature
                     || feature is OculusTouchControllerProfile
                     || feature is MetaQuestTouchPlusControllerProfile)
                     feature.enabled = true;

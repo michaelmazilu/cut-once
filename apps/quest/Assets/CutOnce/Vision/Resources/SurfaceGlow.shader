@@ -18,8 +18,10 @@ Shader "CutOnce/SurfaceGlow"
 {
     Properties
     {
-        _Tint ("Tint (a = strength)", Color) = (0.13, 0.83, 0.93, 0.6)
-        _Bias ("Depth bias", Float) = 0.0
+        _Tint ("Tint (a = how much passthrough the glow replaces)", Color) = (0.13, 0.83, 0.93, 0.35)
+        _FrontBias ("Front sample bias", Float) = 0.0
+        _BackBias ("Back sample bias (excludes the desk the object stands on)", Float) = 0.05
+        _MinFront ("Nearest front sample (m)", Float) = 0.15
     }
     SubShader
     {
@@ -40,7 +42,7 @@ Shader "CutOnce/SurfaceGlow"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _Tint;
-                float _Bias;
+                float _FrontBias, _BackBias, _MinFront;
             CBUFFER_END
 
             struct Attributes
@@ -87,16 +89,30 @@ Shader "CutOnce/SurfaceGlow"
                 float3 frontWorld = TransformObjectToWorld(camObj + dir * tEntry);
                 float3 backWorld = TransformObjectToWorld(i.objectPos);
 
+                // With the eye inside the box (leaning over a table, a person right in front of you)
+                // the entry point is the eye itself, and reprojecting a point at zero depth is
+                // meaningless. Keep the front sample at least _MinFront in front of the eye.
+                float3 toBack = backWorld - _WorldSpaceCameraPos;
+                float backDist = length(toBack);
+                float frontDist = distance(frontWorld, _WorldSpaceCameraPos);
+                if (frontDist < _MinFront) frontWorld = _WorldSpaceCameraPos + toBack * (min(_MinFront, backDist) / max(backDist, 1e-4));
+
             #if defined(HARD_OCCLUSION) || defined(SOFT_OCCLUSION)
-                float visFront = CalculateEnvironmentDepthOcclusion(frontWorld, _Bias);
-                float visBack = CalculateEnvironmentDepthOcclusion(backWorld, _Bias);
+                float visFront = CalculateEnvironmentDepthOcclusion(frontWorld, _FrontBias);
+                // A positive bias on the back sample treats a surface lying ON the back face — the desk
+                // the bottle stands on, the wall a poster hangs on — as "behind", so it is not painted.
+                float visBack = CalculateEnvironmentDepthOcclusion(backWorld, _BackBias);
                 float paint = saturate(visFront * (1.0 - visBack));
             #else
-                float paint = 0.25;   // no depth here (Editor / Link): a faint volume, and C# prefers the box look anyway
+                // Depth supported but not delivering yet (first seconds, waking from sleep): draw
+                // nothing rather than a solid cube. C# swaps to the box look meanwhile.
+                float paint = 0.0;
             #endif
 
-                half4 c = _Tint;
-                c.rgb *= paint;
+                // Additive colour, linear in paint; alpha is how much passthrough the glow replaces,
+                // kept low so the real object stays visible under it (AGENTS rules 5 and 6).
+                half4 c;
+                c.rgb = _Tint.rgb;
                 c.a = saturate(_Tint.a * paint);
                 return c;
             }
