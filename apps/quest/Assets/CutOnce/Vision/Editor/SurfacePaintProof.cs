@@ -412,7 +412,8 @@ namespace CutOnce.Vision.Editor
         private static Check NewCheck(string name, float required) => new Check { name = name, requiredFraction = required };
         private static void Sample(Check check, bool matches) { check.sampledPixels++; if (matches) check.matchingPixels++; }
         private static float Difference(Color32 a, Color32 b) =>
-            Mathf.Max(Mathf.Abs(a.r - b.r), Mathf.Abs(a.g - b.g), Mathf.Abs(a.b - b.b), Mathf.Abs(a.a - b.a)) / 255f;
+            Mathf.Max(Mathf.Max(Mathf.Abs(a.r - b.r), Mathf.Abs(a.g - b.g)),
+                Mathf.Max(Mathf.Abs(a.b - b.b), Mathf.Abs(a.a - b.a))) / 255f;
         private static void Save(Texture2D texture, string directory, string name) =>
             File.WriteAllBytes(Path.Combine(directory, name), texture.EncodeToPNG());
 
