@@ -122,6 +122,62 @@
     .draw{stroke-dashoffset:0 !important}
     .slidein{transform:translate(var(--dx,0),var(--dy,0))}
   }
+
+  /* ── the simulator ──────────────────────────────────────────────────── */
+  .sim{margin:46px 0 10px}
+  .sim-head h2{font-size:clamp(24px,3.4vw,32px); margin:0 0 6px; letter-spacing:-.02em}
+  .sim-head .sub{color:var(--dim); margin:0 0 18px}
+  .sim-grid{display:grid; gap:14px; grid-template-columns:1fr}
+  @media(min-width:900px){.sim-grid{grid-template-columns:minmax(0,1fr) 330px}}
+  /* No min-height: with an aspect ratio it would force the canvas wider than a phone screen. */
+  .sim-stage{position:relative; background:#0a0f18; border:1px solid var(--line); border-radius:16px;
+    overflow:hidden; width:100%; aspect-ratio:4/3; touch-action:none}
+  @media(min-width:900px){.sim-stage{aspect-ratio:16/10}}
+  .sim-stage canvas{display:block; width:100%; height:100%}
+  #sim-labels{position:absolute; inset:0; pointer-events:none}
+  .sim-label{position:absolute; transform:translate(-50%,-100%); white-space:nowrap;
+    font:600 11.5px/1 var(--mono); color:#04121a; background:var(--cyan-2);
+    border-radius:5px; padding:4px 7px; box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  .sim-hint{position:absolute; left:12px; bottom:10px; margin:0; font:500 12px/1 var(--mono);
+    color:var(--faint); background:rgba(7,11,18,.7); padding:6px 9px; border-radius:7px}
+  .sim-sorry{padding:28px; color:var(--dim)}
+  .sim-panel{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px;
+    display:flex; flex-direction:column; gap:12px}
+  .sim-chips{display:flex; flex-wrap:wrap; gap:5px}
+  .sim-chip{font:600 11px/1 var(--mono); color:var(--faint); border:1px solid var(--line);
+    border-radius:999px; padding:5px 9px}
+  .sim-chip.now{color:#04121a; background:var(--cyan-2); border-color:var(--cyan-2)}
+  .sim-chip.past{color:var(--green); border-color:rgba(61,220,132,.4)}
+  .sim-kit{margin:0; font-size:15.5px; color:var(--ink); min-height:44px}
+  .sim-kit b{color:var(--cyan-2); margin-right:7px}
+  .sim-ask{display:flex; gap:7px}
+  .sim-ask input{flex:1; min-width:0; background:#0a1220; border:1px solid var(--line); border-radius:9px;
+    color:var(--ink); padding:9px 11px; font:15px var(--sans)}
+  .sim-ask input:focus{outline:2px solid rgba(34,211,238,.5); outline-offset:1px}
+  .sim-quick{display:flex; flex-wrap:wrap; gap:6px}
+  .sim-panel button{background:#132033; color:var(--ink); border:1px solid var(--line); border-radius:9px;
+    padding:8px 11px; font:500 13.5px var(--sans); cursor:pointer}
+  .sim-panel button:hover{border-color:rgba(103,232,249,.5)}
+  .sim-panel button.primary{background:var(--cyan); color:#04121a; border-color:var(--cyan); font-weight:650}
+  .sim-actions{display:flex; flex-wrap:wrap; gap:6px; margin-top:auto}
+  #sim-body h4{margin:2px 0 8px; font-size:14px; color:var(--dim); font-weight:600;
+    text-transform:uppercase; letter-spacing:.08em}
+  .sim-list{list-style:none; margin:0; padding:0; display:grid; gap:5px}
+  .sim-list li{display:flex; flex-wrap:wrap; gap:4px 8px; align-items:baseline;
+    border-bottom:1px solid var(--line); padding-bottom:5px}
+  .sim-name{font-weight:600}
+  .sim-size{font:500 12.5px var(--mono); color:var(--cyan-2)}
+  .sim-flag{font:500 11px var(--mono); color:var(--faint)}
+  .sim-note,.sim-status,.sim-thinking{margin:0; font-size:13.5px; color:var(--faint)}
+  .sim-idea{display:block; width:100%; text-align:left; margin-bottom:7px}
+  .sim-idea-t{display:block; font-weight:650; font-size:15px}
+  .sim-idea-w{display:block; color:var(--dim); font-size:13.5px; margin:3px 0}
+  .sim-idea-m{display:block; font:500 11.5px var(--mono); color:var(--green)}
+  .sim-steps{margin:0; padding-left:20px; display:grid; gap:6px; color:var(--dim); font-size:15px}
+  .sim-steps li.now{color:var(--cyan-2); font-weight:600}
+  .sim-steps li.done{color:var(--green); text-decoration:line-through}
+  .sim-honest{margin:14px 0 0; font-size:14px; color:var(--faint)}
+  .sim-honest b{color:var(--dim)}
 </style>
 </head>
 <body>
@@ -180,6 +236,43 @@
     <h1>The whole world<br>is your kit.</h1>
     <p class="lead">Put on a Meta Quest 3 and the everyday objects in front of you become holograms you can build with. Ask <strong>Kit</strong> what to build, and it designs something out of exactly what's on your table, then walks you through making it.</p>
     <p class="hint">Here is exactly how that works ↓</p>
+  </section>
+
+  <section class="sim" id="sim">
+    <div class="sim-head">
+      <h2>Run it here, on your laptop</h2>
+      <p class="sub">The same flow the headset runs: rays measure the counter, the objects become digital twins, Kit designs with what it found, and a step only finishes when the real thing is standing in its hologram. Drag the objects around and scan again — nothing is staged.</p>
+    </div>
+    <div class="sim-grid">
+      <div class="sim-stage">
+        <canvas id="sim-canvas"></canvas>
+        <div id="sim-labels"></div>
+        <p class="sim-hint" id="sim-hint">drag to look · scroll to zoom · drag an object to move it</p>
+      </div>
+      <aside class="sim-panel">
+        <div class="sim-chips" id="sim-stages"></div>
+        <p class="sim-kit" id="sim-kit"><b>Kit</b> Ready.</p>
+        <div class="sim-ask">
+          <input id="sim-wish" placeholder="birdhouse, tower, something crazier…" aria-label="What would you like to build?">
+          <button id="sim-ask" class="primary">Ask Kit</button>
+        </div>
+        <div class="sim-quick">
+          <button data-wish="">What can I build?</button>
+          <button data-wish="birdhouse">Birdhouse</button>
+          <button data-wish="something crazier">Something crazier</button>
+        </div>
+        <div id="sim-body"></div>
+        <p class="sim-status" id="sim-status"></p>
+        <div class="sim-actions">
+          <button id="sim-play" class="primary">Play the demo</button>
+          <button id="sim-scan">Scan the counter</button>
+          <button id="sim-shuffle">Shuffle</button>
+          <button id="sim-reset">Reset</button>
+          <button id="sim-sound" aria-pressed="false">Sound off</button>
+        </div>
+      </aside>
+    </div>
+    <p class="sim-honest"><b>Where this differs from the headset:</b> the rays here hit a 3D scene instead of Meta's depth sensor, so there is no noise and nothing is missed; the names come from the scene rather than a model reading a photo; and Kit's words here are written by us, not generated. The measuring, the grouping into objects, the stacking rules, the balance check and the placement check are the real ones.</p>
   </section>
 
   <ol class="steps">
@@ -475,6 +568,21 @@
     }, { rootMargin: "0px 0px -12% 0px", threshold: 0.15 });
     steps.forEach(s => io.observe(s));
   })();
+</script>
+
+<script type="importmap">
+{ "imports": { "three": "/demo/vendor/three.module.js" } }
+</script>
+<script type="module">
+  import { mountSim } from "/demo/sim/sim.js";
+  const root = document.getElementById("sim");
+  try {
+    mountSim(root);
+  } catch (err) {
+    console.error(err);
+    root.querySelector(".sim-stage").innerHTML =
+      "<p class='sim-sorry'>The simulator didn't start in this browser. The steps below explain the same flow.</p>";
+  }
 </script>
 </body>
 </html>

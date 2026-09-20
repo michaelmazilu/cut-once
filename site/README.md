@@ -26,6 +26,29 @@ Settings → Git, connect `michaelmazilu/cut-once` and set the Root Directory to
 
 The CLI leaves `.vercel/` and `.env.local` in this folder; `.gitignore` here keeps both out of git.
 
+## The simulator
+
+`/demo` runs the whole flow in the browser, so the page demonstrates Kitbash instead of only
+describing it. It plays itself when the scene scrolls into view, and again on "Play the demo".
+
+| File | What it is |
+|---|---|
+| `demo/sim/pipeline.js` | The server's rules, ported: surfaces, objects, measured sizes, designs, the balance check, the placement check. No three.js in here. |
+| `demo/sim/sim.js` | The kitchen scene, the ray sweep, the holograms, dragging, and the demo that plays itself. |
+| `demo/vendor/` | three.js r171 and OrbitControls, vendored so the page needs no CDN. |
+
+**Real:** the 128 × 96 ray grid cast from the camera through the view, grouping the hits into a
+surface and separate objects, the sizes those rays measure, the stacking and balance rules, and
+finishing a step only when the object is standing inside its hologram. Press "Shuffle" and every
+object moves, so nothing is placed in advance.
+
+**Not real, and the page says so:** the rays hit a 3D scene, so the depth is exact instead of a
+noisy sensor; the names come from the scene rather than a model reading a photo; and Kit's lines
+are written rather than generated.
+
+From the browser console: `__kitbash.scanNow()`, `.twins`, `.ideas`, `.chosen`, `.play()`, and
+`.snapshot()`, which renders a frame and counts how many pixels are lit, cyan and green.
+
 ## Look at it locally
 
 ```bash
