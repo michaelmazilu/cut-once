@@ -127,7 +127,7 @@ namespace CutOnce.Vision
             {
                 LastSuccesses++;
                 var placed = LocateWithoutDepth(centreRay, out world);
-                if (placed) size = SizeAt(Vector3.Distance(cameraPose.position, world), box, input, cameraPose);
+                if (placed) size = SizeAt(Vector3.Distance(cameraPose.position, world), box, input, cameraPose, HeightCap(detection.className));
                 return placed;
             }
             var forward = cameraPose.rotation * Vector3.forward;
@@ -175,25 +175,28 @@ namespace CutOnce.Vision
             var cosine = Vector3.Dot(centreRay.direction, forward);
             if (cosine < 0.1f) { LastFailureReason = "detection too far off-axis to place"; return false; }
             world = centreRay.GetPoint(depthAt / cosine);
-            size = SizeAt(depthAt / cosine, box, input, cameraPose);
+            size = SizeAt(depthAt / cosine, box, input, cameraPose, HeightCap(detection.className));
             LastSuccesses++;
             LastFailureReason = "";
             return true;
         }
+
+        /// <summary>A person is real and taller than furniture-sized clutter; everything else keeps the tight clamp.</summary>
+        private float HeightCap(string className) => className == "person" ? 2.0f : maxSizeM;
 
         /// <summary>
         /// The box's world size at a given distance along the view: rays through the edge midpoints,
         /// cut at that distance, measured against each other. Uses the same camera model as the
         /// position, so the size is consistent with where the object was placed.
         /// </summary>
-        private Vector3 SizeAt(float distance, Rect box, Vector2 inputSize, Pose cameraPose)
+        private Vector3 SizeAt(float distance, Rect box, Vector2 inputSize, Pose cameraPose, float maxHeight)
         {
             var left = RayThrough(new Vector2(box.xMin, box.center.y), inputSize, cameraPose).GetPoint(distance);
             var right = RayThrough(new Vector2(box.xMax, box.center.y), inputSize, cameraPose).GetPoint(distance);
             var top = RayThrough(new Vector2(box.center.x, box.yMin), inputSize, cameraPose).GetPoint(distance);
             var bottom = RayThrough(new Vector2(box.center.x, box.yMax), inputSize, cameraPose).GetPoint(distance);
             var width = Mathf.Clamp(Vector3.Distance(left, right), minSizeM, maxSizeM);
-            var height = Mathf.Clamp(Vector3.Distance(top, bottom), minSizeM, maxSizeM);
+            var height = Mathf.Clamp(Vector3.Distance(top, bottom), minSizeM, maxHeight);
             // Depth is the one axis the camera cannot see. The smaller footprint axis is the best
             // stand-in, and it is capped harder: a dining table is wide but never a metre thick.
             var depth = Mathf.Clamp(Mathf.Min(width, height), minSizeM, 0.6f);
