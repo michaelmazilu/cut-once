@@ -6,14 +6,17 @@ using UnityEngine.UI;
 namespace CutOnce.UI
 {
     /// <summary>
-    /// A compact task panel: current instruction, progress, connection and the part under the pointer.
-    /// Build narration and temporary notices share the panel instead of floating above and below it.
+    /// A compact task panel. During a build it deliberately shows only the object's name, its progress bar and the
+    /// controls; setup messages can use the fuller layout before an object exists.
     /// It is world-locked (a head-locked panel shakes on the cast) and built in code, so there is no prefab to break.
-    /// All wording comes from Core.HudText.
+    /// Detailed narration belongs to the voice assistant rather than this at-a-glance panel.
     /// </summary>
     public sealed class HudController : MonoBehaviour
     {
-        const float Width = 460f, Height = 124f, MetresPerUnit = 0.001f;
+        // The task HUD is world-locked and can end up well behind the build. Keep it physically larger than the
+        // near, head-locked voice HUD so its smallest status text still subtends enough pixels in the eye buffer.
+        const float Width = 460f, Height = 124f, BuildHeight = 142f, MetresPerUnit = 0.0013f;
+        const string BuildControls = "B: mark / undo   ·   Hold B: flag wrong\nGrip + stick: move   ·   Trigger: lock   ·   Hold stick: place again";
         static readonly Color Panel = new Color(0.035f, 0.045f, 0.05f, 0.94f), Ink = new Color(0.92f, 0.97f, 1f, 1f), Dim = new Color(0.65f, 0.70f, 0.70f, 1f),
             Accent = new Color(0.58f, 0.82f, 0.73f, 1f), Warn = new Color(1f, 0.85f, 0.3f, 1f);
 
@@ -27,7 +30,7 @@ namespace CutOnce.UI
             var go = new GameObject("[HUD]", typeof(RectTransform));
             go.transform.SetParent(parent, false);
             var canvas = go.AddComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
-            go.AddComponent<CanvasScaler>().dynamicPixelsPerUnit = 4f;                  // crisp text at arm's length
+            VrTextQuality.AddScaler(go, VrTextQuality.DistantDynamicPixelsPerUnit);
             var rect = (RectTransform)go.transform; rect.sizeDelta = new Vector2(Width, Height); rect.localScale = Vector3.one * MetresPerUnit;
             var hud = go.AddComponent<HudController>();
             hud.Build(rect);
@@ -85,11 +88,9 @@ namespace CutOnce.UI
         public void ShowState(PlanDto plan, BuildStateDto state, List<MaterialLine> materials, IEnumerable<BuildEventDto> events, string scaleLabel = "")
         {
             _hasBuild = plan.parts.Count > 0;
-            _title.text = !_hasBuild ? "Cut Once" : string.IsNullOrEmpty(scaleLabel) ? plan.name : $"{plan.name} · {scaleLabel}";
-            _progress.text = $"{HudText.Progress(state)}   ·   {HudText.TimeLeft(state)}";
+            _title.text = _hasBuild ? plan.name : "Cut Once";
+            _hint.text = _hasBuild ? BuildControls : "";
             _bar.sizeDelta = new Vector2((Width - 44) * Mathf.Clamp01(state.progress.pct / 100f), 2);
-            _stepTitle.text = HudText.StepTitle(plan, state);
-            _stepBody.text = HudText.StepBody(plan, state);
             Layout();
         }
 
@@ -98,7 +99,9 @@ namespace CutOnce.UI
         public void ShowStatus(string connection, string alignment)
         {
             _status.text = connection ?? "";
-            _hint.text = alignment ?? "";
+            // Alignment owns placement state, but its transient status (for example "Looking for the saved
+            // position…") must never replace this panel's compact controller legend.
+            _hint.text = _hasBuild ? BuildControls : "";
             Layout();
         }
         public void ShowAnswer(string text) { _answer.text = text ?? ""; _answerUntil = Time.time + 25f; Layout(); }
@@ -108,22 +111,45 @@ namespace CutOnce.UI
             _toast.text = text; _toastUntil = Time.time + seconds; Layout();
         }
 
-        // Only the active task and pointed part occupy space. No always-on inventory or event log.
-        // Text sizes stay fixed; the panel grows to fit its content instead of shrinking the font.
+        // Once a build exists, keep the panel glanceable: object, progress and controls only.
         void Layout()
         {
-            float y = 72;
-            _progress.gameObject.SetActive(_hasBuild);
-            _bar.gameObject.SetActive(_hasBuild);
-            _barBack.gameObject.SetActive(_hasBuild);
-            _stepTitle.gameObject.SetActive(_hasBuild);
-            _stepBody.gameObject.SetActive(_hasBuild);
             if (_hasBuild)
             {
-                y = 122;
-                Stack(_stepTitle, ref y, 26, 68);
-                Stack(_stepBody, ref y, 24, 160);
+                _title.gameObject.SetActive(true);
+                _title.fontSize = 22;
+                SetRect(_title.rectTransform, 34, 16, Width - 56, 32);
+
+                _barBack.gameObject.SetActive(true);
+                _bar.gameObject.SetActive(true);
+                SetRect(_barBack, 22, 61, Width - 44, 8);
+                SetRect(_bar, 22, 61, _bar.sizeDelta.x, 8);
+
+                _hint.gameObject.SetActive(true);
+                SetRect(_hint.rectTransform, 22, 83, Width - 44, 46);
+
+                _status.gameObject.SetActive(false);
+                _progress.gameObject.SetActive(false);
+                _stepTitle.gameObject.SetActive(false);
+                _stepBody.gameObject.SetActive(false);
+                _part.gameObject.SetActive(false);
+                _answer.gameObject.SetActive(false);
+                _placement.gameObject.SetActive(false);
+                _toast.gameObject.SetActive(false);
+                Resize(BuildHeight);
+                return;
             }
+
+            _title.gameObject.SetActive(true);
+            _title.fontSize = 15;
+            SetRect(_title.rectTransform, 34, 18, Width - 56, 22);
+            _status.gameObject.SetActive(true);
+            float y = 72;
+            _progress.gameObject.SetActive(false);
+            _bar.gameObject.SetActive(false);
+            _barBack.gameObject.SetActive(false);
+            _stepTitle.gameObject.SetActive(false);
+            _stepBody.gameObject.SetActive(false);
             Stack(_hint, ref y, 22, 76);
             // The answer temporarily takes the context slot; selecting a part still updates its card underneath.
             if (!string.IsNullOrEmpty(_answer.text))
@@ -138,7 +164,17 @@ namespace CutOnce.UI
             }
             Stack(_placement, ref y, 28, 104);
             Stack(_toast, ref y, 22, 64);
-            float height = y + 14;
+            Resize(y + 14);
+        }
+
+        static void SetRect(RectTransform rect, float x, float y, float width, float height)
+        {
+            rect.anchoredPosition = new Vector2(x, -y);
+            rect.sizeDelta = new Vector2(width, height);
+        }
+
+        void Resize(float height)
+        {
             _panel.sizeDelta = new Vector2(Width, height);
             ((RectTransform)transform).sizeDelta = new Vector2(Width, height);
         }

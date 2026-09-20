@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using CutOnce.AR;
+using CutOnce.UI;
 using UnityEngine;
 
 namespace CutOnce.Room
@@ -30,6 +31,7 @@ namespace CutOnce.Room
             var panel = new GameObject("Room instructions", typeof(RectTransform), typeof(Canvas));
             _panel = panel.transform; _panel.SetParent(transform, false);
             panel.GetComponent<Canvas>().renderMode = RenderMode.WorldSpace;
+            VrTextQuality.AddScaler(panel);
             var rect = (RectTransform)_panel; rect.sizeDelta = new Vector2(480, 330); rect.localScale = Vector3.one * .001f;
             var image = panel.AddComponent<UnityEngine.UI.Image>(); image.color = new Color(.035f,.045f,.05f,.94f); image.raycastTarget = false;
             _text = Label("Instructions", _panel, new Vector2(436, 290), 16);
@@ -86,6 +88,7 @@ namespace CutOnce.Room
                 var a = room.floor[i]; var b = room.floor[(i + 1) % room.floor.Length];
                 var go = new GameObject("Wall dimension", typeof(RectTransform), typeof(Canvas));
                 go.transform.SetParent(frame, false); go.GetComponent<Canvas>().renderMode = RenderMode.WorldSpace;
+                VrTextQuality.AddScaler(go);
                 var rect = (RectTransform)go.transform; rect.sizeDelta = new Vector2(220, 42); rect.localScale = Vector3.one * .001f;
                 rect.localPosition = (a + b) * .5f + Vector3.up * .15f;
                 Vector3 inward = -new Vector3(rect.localPosition.x, 0, rect.localPosition.z);
