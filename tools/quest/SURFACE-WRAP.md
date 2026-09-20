@@ -47,6 +47,24 @@ of overlapping/same-depth objects.
 
 ## On-headset acceptance
 
+Before headset testing, `pnpm quest:recognition-proof` runs the production model
+and preprocessing on two pinned COCO validation photos with real bottles and
+tables. It repeats each inference three times at the unchanged 0.35 detector /
+0.40 scanner thresholds, checks the predicted names and IoU >= 0.40 against
+the dataset's annotated boxes, and checks a blank negative control. The rendered
+diagnostic boxes show actual detector coordinates; they are not the headset UI.
+Results and annotated photos are in `Logs/cli/recognition-proof`.
+
+The bundled Meta model already converts its output to `(x1,y1,x2,y2)` corners;
+decoding it again as centre/size misplaces the depth rays. `cornerBoxes` therefore
+defaults to true, matching the bundled asset and Meta's converter. A recorded
+photo proof validates this path but cannot validate physical camera access,
+permissions, stereo alignment or Quest performance while the device is disconnected.
+
+Photo URLs, SHA-256 digests, original Flickr sources and CC BY 2.0 license links
+are recorded in `tools/quest/fixtures/recognition-coco.json`. Inputs are downloaded
+only for the explicit recognition-proof command; photos are not shipped in the APK.
+
 1. Install the built APK on the Quest 3, grant camera/scene permission, and use a
    well-lit table with visible legs and a bottle on top. Keep debug off.
 2. Confirm the table top/legs and bottle gain blue, while empty space, the wall,

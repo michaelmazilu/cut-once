@@ -60,6 +60,8 @@ namespace CutOnce.Vision
 
         private VisionCamera _camera;
         private EnvironmentRaycastManager _raycast;
+        private float _nextRaycastBindAt = float.NegativeInfinity;
+        private bool _warnedRaycastUnavailable;
         private readonly List<float> _distances = new();
 
         public bool IsSupported => EnvironmentRaycastManager.IsSupported;
@@ -67,14 +69,29 @@ namespace CutOnce.Vision
         private void Awake()
         {
             _camera = GetComponent<VisionCamera>() ?? FindAnyObjectByType<VisionCamera>();
+            TryBindRaycast();
+        }
+
+        private void TryBindRaycast()
+        {
+            // XR can become ready after Awake. A one-shot support check permanently stranded the
+            // locator in its room-plane fallback even after real depth raycasting became available.
+            // Retry only while unbound, at most once a second; no per-frame scene lookup or allocation.
+            if (_raycast != null || Time.unscaledTime < _nextRaycastBindAt) return;
+            _nextRaycastBindAt = Time.unscaledTime + 1f;
             if (!EnvironmentRaycastManager.IsSupported)
             {
                 LastFailureReason = "EnvironmentRaycastManager not supported on this device/simulator";
-                Debug.LogWarning("[Vision] " + LastFailureReason);
+                if (!_warnedRaycastUnavailable)
+                {
+                    _warnedRaycastUnavailable = true;
+                    Debug.LogWarning("[Vision] " + LastFailureReason + "; will retry as XR starts.");
+                }
                 return;
             }
             _raycast = FindAnyObjectByType<EnvironmentRaycastManager>();
             if (_raycast == null) _raycast = gameObject.AddComponent<EnvironmentRaycastManager>();
+            LastFailureReason = "";
         }
 
         /// <summary>
@@ -124,6 +141,7 @@ namespace CutOnce.Vision
             var input = detection.inputSize;
             if (input.x <= 0f || input.y <= 0f) { LastFailureReason = "bad input size"; return false; }
 
+            if (_raycast == null) TryBindRaycast();
             var centreRay = RayThrough(box.center, input, cameraPose);
             if (_raycast == null)                                    // no depth sensing: the room's surfaces instead of nothing at all
             {

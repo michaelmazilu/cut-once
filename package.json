@@ -39,6 +39,7 @@
     "quest:play": "tsx tools/quest/unity.ts play",
     "quest:build": "tsx tools/quest/unity.ts build",
     "quest:surface-proof": "tsx tools/quest/unity.ts surface-proof",
+    "quest:recognition-proof": "tsx tools/quest/unity.ts recognition-proof",
     "quest:install": "tsx tools/quest/unity.ts install"
   },
   "devDependencies": {

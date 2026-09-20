@@ -21,8 +21,9 @@ namespace CutOnce.Vision
     ///  - the sample drives a world-space uGUI canvas; we raise an event and let the rest of the
     ///    pipeline decide what to do with it.
     ///
-    /// Never blocks the render thread: Schedule() queues the layers and every readback is polled
-    /// across frames with `yield return null` until it completes.
+    /// Output readback is polled across frames with `yield return null` until it completes.
+    /// Preprocessing, initial model warm-up and layer scheduling still need headset frame-time
+    /// measurement; asynchronous output readback alone is not a smoothness guarantee.
     /// </summary>
     public class YoloDetector : MonoBehaviour
     {
@@ -36,14 +37,14 @@ namespace CutOnce.Vision
         [Range(0f, 1f)] public float scoreThreshold = 0.35f;
         [Range(0f, 1f)] public float iouThreshold = 0.5f;
 
-        [Tooltip("Abandon a frame whose readback never lands, rather than spinning the frame loop forever.")]
+        [Tooltip("Report and discard a stalled frame after this many seconds. Wait asynchronously for its output before reusing the worker, then resume scanning.")]
         public float readbackTimeoutSeconds = 8f;
 
         [Tooltip("Upper bound on inference rate. The model takes as long as it takes; this only stops us queueing faster than that. A few a second keep the labels live without cooking an XR2.")]
         public float maxInferencesPerSecond = 8f;
 
-        [Tooltip("Only for a model whose head already gives corners (x1,y1,x2,y2). YOLO gives centre+size.")]
-        public bool cornerBoxes;
+        [Tooltip("The bundled Meta YOLO model already outputs corners (x1,y1,x2,y2). Turn off only for a replacement model that outputs centre+size.")]
+        public bool cornerBoxes = true;
 
         /// <summary>No inference while this is set; the loop keeps waiting, so it can be turned back on.</summary>
         public bool Paused { get; set; }
@@ -152,7 +153,7 @@ namespace CutOnce.Vision
         /// </summary>
         public IEnumerator DetectOnce(Texture texture, Pose cameraPose)
         {
-            if (!ModelLoaded || texture == null) yield break;
+            if (!ModelLoaded || texture == null || InferenceRunning) yield break;
 
             _lastInferenceStartedAt = Time.time;
             var startedAt = Time.realtimeSinceStartup;
@@ -167,22 +168,34 @@ namespace CutOnce.Vision
             Tensor<int> classIds = null;
             Tensor<float> scores = null;
 
-            var readback = ReadThree(r => { boxes = r.Item1; classIds = r.Item2; scores = r.Item3; });
-            while (readback.MoveNext())
+            var readback = ReadThree(b => boxes = b, c => classIds = c, s => scores = s);
+            var timedOut = false;
+            while (true)
             {
-                // Bounded: an unbounded `while (!IsCompleted) yield return null` spins the frame loop
-                // at 100% forever if a readback never lands, which is a hang, not a slow frame.
-                if (Time.realtimeSinceStartup - startedAt > readbackTimeoutSeconds)
+                // A readback cannot safely be cancelled. Report a stale frame once, but keep polling
+                // its existing request before scheduling another frame on the same worker. No clone
+                // exists yet, so abandoning a Unity Awaitable cannot leak a late native allocation.
+                if (!timedOut && Time.realtimeSinceStartup - startedAt > readbackTimeoutSeconds)
                 {
-                    Fail($"inference readback did not complete within {readbackTimeoutSeconds}s; skipping frame");
+                    timedOut = true;
+                    Fail($"inference readback stalled after {readbackTimeoutSeconds}s; waiting for it to finish before scanning resumes");
+                }
+                if (!TryAdvanceReadback(readback, out var waiting))
+                {
                     InferenceRunning = false;
                     DisposeAll(boxes, classIds, scores);
                     yield break;
                 }
+                if (!waiting) break;
                 yield return readback.Current;
             }
 
             InferenceRunning = false;
+            if (timedOut)
+            {
+                DisposeAll(boxes, classIds, scores);
+                yield break; // Never publish the old camera pose after a long stall.
+            }
             LastInferenceMs = (Time.realtimeSinceStartup - startedAt) * 1000f;
             TotalInferences++;
             var instant = LastInferenceMs > 0f ? 1000f / LastInferenceMs : 0f;
@@ -260,19 +273,40 @@ namespace CutOnce.Vision
             }
         }
 
-        /// <summary>Poll the three output readbacks across frames, handing them back when all land.</summary>
-        private IEnumerator ReadThree(Action<(Tensor<float>, Tensor<int>, Tensor<float>)> done)
+        /// <summary>Request first, poll without allocating, then own each CPU clone immediately.</summary>
+        private IEnumerator ReadThree(Action<Tensor<float>> gotBoxes, Action<Tensor<int>> gotClasses,
+            Action<Tensor<float>> gotScores)
         {
-            var boxesAwaiter = (_worker.PeekOutput(0) as Tensor<float>).ReadbackAndCloneAsync().GetAwaiter();
-            while (!boxesAwaiter.IsCompleted) yield return null;
+            var boxes = _worker.PeekOutput(0) as Tensor<float>
+                ?? throw new InvalidOperationException("model output 0 must contain float boxes");
+            var classes = _worker.PeekOutput(1) as Tensor<int>
+                ?? throw new InvalidOperationException("model output 1 must contain integer class IDs");
+            var scores = _worker.PeekOutput(2) as Tensor<float>
+                ?? throw new InvalidOperationException("model output 2 must contain float scores");
+            boxes.ReadbackRequest();
+            classes.ReadbackRequest();
+            scores.ReadbackRequest();
+            while (!ReadbackComplete(boxes) || !ReadbackComplete(classes) || !ReadbackComplete(scores))
+                yield return null;
 
-            var classesAwaiter = (_worker.PeekOutput(1) as Tensor<int>).ReadbackAndCloneAsync().GetAwaiter();
-            while (!classesAwaiter.IsCompleted) yield return null;
+            // All backend work is complete before these CPU copies. If a later copy throws, the
+            // caller already owns and can dispose every earlier copy rather than leaking them.
+            gotBoxes(boxes.ReadbackAndClone());
+            gotClasses(classes.ReadbackAndClone());
+            gotScores(scores.ReadbackAndClone());
+        }
 
-            var scoresAwaiter = (_worker.PeekOutput(2) as Tensor<float>).ReadbackAndCloneAsync().GetAwaiter();
-            while (!scoresAwaiter.IsCompleted) yield return null;
+        private static bool ReadbackComplete(Tensor tensor) => tensor.count == 0 || tensor.IsReadbackRequestDone();
 
-            done((boxesAwaiter.GetResult(), classesAwaiter.GetResult(), scoresAwaiter.GetResult()));
+        private bool TryAdvanceReadback(IEnumerator readback, out bool waiting)
+        {
+            try { waiting = readback.MoveNext(); return true; }
+            catch (Exception e)
+            {
+                waiting = false;
+                Fail("reading inference outputs failed: " + e.Message);
+                return false;
+            }
         }
 
         private static void DisposeAll(Tensor<float> a, Tensor<int> b, Tensor<float> c)
@@ -333,16 +367,20 @@ namespace CutOnce.Vision
                 }
             }
 
-            // The head gives each box as centre-width-height — Ultralytics' own layout, and what Meta's sample reads
-            // out of this very model. Everything downstream (IoU here, the Rect below) is corners, so it is converted
-            // once, here. Read as corners, a box 100 px wide at x = 320 becomes 220 px WIDE OF ZERO: the rectangle
-            // inverts, its centre lands nowhere near the object, and IoU stops suppressing duplicates.
-            Vector4 Box(int i)
-            {
-                float a = boxes[i, 0], b = boxes[i, 1], c = boxes[i, 2], d = boxes[i, 3];
-                return cornerBoxes ? new Vector4(a, b, c, d) : new Vector4(a - c * 0.5f, b - d * 0.5f, a + c * 0.5f, b + d * 0.5f);
-            }
+            Vector4 Box(int i) => DecodeModelBox(
+                new Vector4(boxes[i, 0], boxes[i, 1], boxes[i, 2], boxes[i, 3]), cornerBoxes);
         }
+
+        /// <summary>
+        /// Meta's SentisModelEditorConverter bakes a centres-to-corners MatMul into the model, so its
+        /// first output is already x1,y1,x2,y2. The bundled binary is byte-identical to that sample
+        /// (SHA-256 cc25e14d60a90efeddaeedcc5a666c342345e722b281a3f6e73c692adb796b21).
+        /// Converting it again changes the centre used by camera/depth rays, not just the drawing.
+        /// The explicit false option is retained for replacement models with raw centre+size output.
+        /// </summary>
+        public static Vector4 DecodeModelBox(Vector4 raw, bool corners = true)
+            => corners ? raw : new Vector4(raw.x - raw.z * 0.5f, raw.y - raw.w * 0.5f,
+                raw.x + raw.z * 0.5f, raw.y + raw.w * 0.5f);
 
         private static float IoU(Vector4 a, Vector4 b)
         {

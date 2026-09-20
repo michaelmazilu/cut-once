@@ -7,6 +7,7 @@
  *   pnpm quest:play      open the app in Meta XR Simulator (Play mode) and leave it running for you
  *   pnpm quest:build     build the APK the headset installs (apps/quest/Builds/CutOnce.apk)
  *   pnpm quest:surface-proof render and verify the surface shader against synthetic measured depth
+ *   pnpm quest:recognition-proof run the real detector on pinned photos and check names/box overlap
  *   pnpm quest:install   install that APK on a Quest plugged in by USB-C and start it
  *
  * The Editor must be closed: Unity allows one instance per project. With it open, the Cut Once menu runs the
@@ -320,6 +321,30 @@ function surfaceProof(): number {
   return 0;
 }
 
+/** The production model/preprocessor on recorded photos; deliberately not claimed as a headset test. */
+function recognitionProof(): number {
+  const download = spawnSync(process.execPath, [join(ROOT, "tools/quest/download-recognition-fixtures.mjs")], { stdio: "inherit" });
+  if (download.status !== 0) return download.status ?? 1;
+  const manifestPath = join(ROOT, "tools/quest/fixtures/recognition-coco.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    fixtures: { fileName: string; expectations: { className: string }[] }[];
+  };
+  const photos = manifest.fixtures.map((f) => join(LOGS, "recognition-fixtures", f.fileName)).join(";");
+  const expected = manifest.fixtures.map((f) => f.expectations.map((e) => e.className).join(",")).join(";");
+  const report = join(LOGS, "recognition-proof", "report.json");
+  fresh(report);
+  const run = unity("recognition-proof", ["-executeMethod", "CutOnce.Vision.Editor.RecognitionProof.Run",
+    "-recognitionPhoto", photos, "-recognitionExpected", expected, "-recognitionGroundTruth", manifestPath],
+  { graphics: true, minutes: 15 });
+  if (run.code !== 0) return run.code;
+  if (!existsSync(report) || JSON.parse(readFileSync(report, "utf8")).passed !== true) {
+    console.error("Recorded-photo recognition proof did not produce a passing report.");
+    return 1;
+  }
+  console.log(`Verified recorded-photo recognition: ${report} (not a live-headset test).`);
+  return 0;
+}
+
 /** Installs without pre-granting permissions, so the headset asks for the camera and microphone as it will at the demo. */
 function install(): number {
   if (!existsSync(APK)) { console.error("No APK yet. Run pnpm quest:build first."); return 1; }
@@ -337,7 +362,7 @@ function install(): number {
   return 0;
 }
 
-const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof };
+const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof, "recognition-proof": recognitionProof };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const name = process.argv[2] ?? "";
   const cmd = commands[name];

@@ -1,0 +1,29 @@
+{
+  "scope": "Recorded RGB detector regression fixtures; not live Quest camera evidence.",
+  "dataset": "COCO 2017 validation",
+  "annotations": "https://s3.amazonaws.com/images.cocodataset.org/annotations/annotations_trainval2017.zip",
+  "fixtures": [
+    {
+      "fileName": "000000160012.jpg",
+      "url": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000160012.jpg",
+      "sha256": "b660ce7ce72dcfa459181967524c53f9360318652c0014790da9fa096ccf1ae2",
+      "source": "https://www.flickr.com/photo.gne?id=4409615060",
+      "license": "https://creativecommons.org/licenses/by/2.0/",
+      "expectations": [
+        { "className": "bottle", "x": 1.98, "y": 1.06, "width": 107.07, "height": 388.63 },
+        { "className": "dining table", "x": 3.27, "y": 157.75, "width": 635.37, "height": 296.44 }
+      ]
+    },
+    {
+      "fileName": "000000146489.jpg",
+      "url": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000146489.jpg",
+      "sha256": "6b458ff1cc4ae8c4006f460ea0b10b0e60f1e8c5775370717fd1aa5d082c4f80",
+      "source": "https://www.flickr.com/photo.gne?id=5841328823",
+      "license": "https://creativecommons.org/licenses/by/2.0/",
+      "expectations": [
+        { "className": "bottle", "x": 180.3, "y": 3.6, "width": 110.82, "height": 319.43 },
+        { "className": "dining table", "x": 2.16, "y": 2.28, "width": 637.84, "height": 477.72 }
+      ]
+    }
+  ]
+}

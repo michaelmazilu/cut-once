@@ -57,6 +57,19 @@ jobs:
         run: caffeinate -i pnpm quest:setup
       - name: Compile, test, and check Quest readiness
         run: caffeinate -i pnpm quest:check
+      - name: Verify actual model recognition on recorded photos
+        run: caffeinate -i pnpm quest:recognition-proof
+      - name: Upload recognition evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-recognition-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/recognition-proof/
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/recognition-fixtures/sources.json
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/recognition-proof.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Render and verify surface-wrap evidence
         run: caffeinate -i pnpm quest:surface-proof
       - name: Upload surface-wrap screenshots
