@@ -57,6 +57,8 @@ jobs:
         run: caffeinate -i pnpm quest:setup
       - name: Compile, test, and check Quest readiness
         run: caffeinate -i pnpm quest:check
+      - name: Render and verify surface-wrap evidence
+        run: caffeinate -i pnpm quest:surface-proof
       - name: Build Android APK
         run: caffeinate -i pnpm quest:build
       - name: Capture generated settings changes

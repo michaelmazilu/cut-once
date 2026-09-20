@@ -47,7 +47,7 @@ namespace CutOnce.Vision
         public float minDistance = 0.2f;   // Quest depth is unreliable closer than this
         public float maxDistance = 6f;     // official guidance: limited accuracy beyond ~4m
 
-        [Tooltip("No estimated object dimension leaves this range: a mis-depthed bottle must never become a room-sized cube.")]
+        [Tooltip("Camera-aligned dimensions for ordinary objects. People and tables have larger class-specific caps; rotated world bounds can be wider.")]
         public float minSizeM = 0.05f;
         public float maxSizeM = 1.2f;
 
@@ -108,10 +108,12 @@ namespace CutOnce.Vision
         /// <paramref name="cameraPose"/> must be the pose captured with the frame the detection came from.
         ///
         /// The size comes from the same two facts the position does: the detection's pixel box and the
-        /// depth the samples agreed on. Rays through the box's edge midpoints, cut at that depth, give
-        /// width and height in metres; depth extent is taken as the smaller of the two (a bottle is
-        /// roughly as deep as it is wide; nothing useful is deeper than it is big). Everything is
-        /// clamped to [minSizeM, maxSizeM] so one wall-hit sample can never produce a giant cube.
+        /// depth the samples agreed on. Rays through the box's edge midpoints intersect the SAME
+        /// camera-forward depth plane, giving image-plane width and height in metres. Thickness is
+        /// only a heuristic, not a recovered object mesh. Rotating those camera-aligned extents into
+        /// conservative world bounds prevents an oblique view from cutting the highlight in half.
+        /// The resulting AABB includes extra space at oblique angles and can include nearby clutter;
+        /// a depth surface inside these bounds is not necessarily part of the detected object.
         /// </summary>
         public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world, out Vector3 size)
         {
@@ -127,7 +129,11 @@ namespace CutOnce.Vision
             {
                 LastSuccesses++;
                 var placed = LocateWithoutDepth(centreRay, out world);
-                if (placed) size = SizeAt(Vector3.Distance(cameraPose.position, world), box, input, cameraPose, HeightCap(detection.className));
+                if (placed)
+                {
+                    var forwardDepth = Vector3.Dot(world - cameraPose.position, cameraPose.rotation * Vector3.forward);
+                    size = SizeAt(forwardDepth, box, input, cameraPose, detection.className);
+                }
                 return placed;
             }
             var forward = cameraPose.rotation * Vector3.forward;
@@ -175,32 +181,71 @@ namespace CutOnce.Vision
             var cosine = Vector3.Dot(centreRay.direction, forward);
             if (cosine < 0.1f) { LastFailureReason = "detection too far off-axis to place"; return false; }
             world = centreRay.GetPoint(depthAt / cosine);
-            size = SizeAt(depthAt / cosine, box, input, cameraPose, HeightCap(detection.className));
+            size = SizeAt(depthAt, box, input, cameraPose, detection.className);
             LastSuccesses++;
             LastFailureReason = "";
             return true;
         }
 
-        /// <summary>A person is real and taller than furniture-sized clutter; everything else keeps the tight clamp.</summary>
-        private float HeightCap(string className) => className == "person" ? 2.0f : maxSizeM;
+        /// <summary>
+        /// Rays through all four edge midpoints intersect one camera-forward depth plane. Equal
+        /// distances ALONG the four rays would instead measure on a sphere and shrink off-axis boxes.
+        /// </summary>
+        private Vector3 SizeAt(float forwardDepth, Rect box, Vector2 inputSize, Pose cameraPose, string className)
+        {
+            if (!TryPointAtForwardDepth(RayThrough(new Vector2(box.xMin, box.center.y), inputSize, cameraPose), cameraPose, forwardDepth, out var left)
+                || !TryPointAtForwardDepth(RayThrough(new Vector2(box.xMax, box.center.y), inputSize, cameraPose), cameraPose, forwardDepth, out var right)
+                || !TryPointAtForwardDepth(RayThrough(new Vector2(box.center.x, box.yMin), inputSize, cameraPose), cameraPose, forwardDepth, out var top)
+                || !TryPointAtForwardDepth(RayThrough(new Vector2(box.center.x, box.yMax), inputSize, cameraPose), cameraPose, forwardDepth, out var bottom))
+                return Vector3.one * minSizeM;
+
+            var cameraSize = EstimateCameraSize(Vector3.Distance(left, right), Vector3.Distance(top, bottom),
+                className, minSizeM, maxSizeM);
+            return WorldAlignedSize(cameraSize, cameraPose.rotation);
+        }
+
+        /// <summary>Intersect a ray with the plane that is forwardDepth metres in front of a captured camera.</summary>
+        public static bool TryPointAtForwardDepth(Ray ray, Pose cameraPose, float forwardDepth, out Vector3 point)
+        {
+            point = default;
+            if (!(forwardDepth > 0f) || float.IsInfinity(forwardDepth)) return false;
+            var forward = cameraPose.rotation * Vector3.forward;
+            var cosine = Vector3.Dot(ray.direction, forward);
+            if (!(cosine > 0.1f)) return false;
+            var distance = (forwardDepth - Vector3.Dot(ray.origin - cameraPose.position, forward)) / cosine;
+            if (!(distance > 0f) || float.IsInfinity(distance)) return false;
+            point = ray.GetPoint(distance);
+            return true;
+        }
 
         /// <summary>
-        /// The box's world size at a given distance along the view: rays through the edge midpoints,
-        /// cut at that distance, measured against each other. Uses the same camera model as the
-        /// position, so the size is consistent with where the object was placed.
+        /// Bounds only: camera Z thickness is unobserved. Tables need room for their footprint, not
+        /// just the thin tabletop seen edge-on, but this broader estimate can include nearby clutter.
+        /// These are bounds for selecting depth surfaces, never a claim about an object's real shape.
         /// </summary>
-        private Vector3 SizeAt(float distance, Rect box, Vector2 inputSize, Pose cameraPose, float maxHeight)
+        public static Vector3 EstimateCameraSize(float width, float height, string className, float minimum, float ordinaryMaximum)
         {
-            var left = RayThrough(new Vector2(box.xMin, box.center.y), inputSize, cameraPose).GetPoint(distance);
-            var right = RayThrough(new Vector2(box.xMax, box.center.y), inputSize, cameraPose).GetPoint(distance);
-            var top = RayThrough(new Vector2(box.center.x, box.yMin), inputSize, cameraPose).GetPoint(distance);
-            var bottom = RayThrough(new Vector2(box.center.x, box.yMax), inputSize, cameraPose).GetPoint(distance);
-            var width = Mathf.Clamp(Vector3.Distance(left, right), minSizeM, maxSizeM);
-            var height = Mathf.Clamp(Vector3.Distance(top, bottom), minSizeM, maxHeight);
-            // Depth is the one axis the camera cannot see. The smaller footprint axis is the best
-            // stand-in, and it is capped harder: a dining table is wide but never a metre thick.
-            var depth = Mathf.Clamp(Mathf.Min(width, height), minSizeM, 0.6f);
+            var table = className == "dining table" || className == "table";
+            var widthCap = table ? Mathf.Max(ordinaryMaximum, 3f) : ordinaryMaximum;
+            var heightCap = table ? widthCap : className == "person" ? Mathf.Max(ordinaryMaximum, 2f) : ordinaryMaximum;
+            width = Mathf.Clamp(width, minimum, widthCap);
+            height = Mathf.Clamp(height, minimum, heightCap);
+            var depth = table
+                ? Mathf.Clamp(Mathf.Max(width, height) * 0.65f, minimum, 1.5f)
+                : Mathf.Clamp(Mathf.Min(width, height), minimum, 0.6f);
             return new Vector3(width, height, depth);
+        }
+
+        /// <summary>World-axis bounds that contain every corner of a rotated camera-aligned box.</summary>
+        public static Vector3 WorldAlignedSize(Vector3 cameraSize, Quaternion cameraRotation)
+        {
+            var right = cameraRotation * Vector3.right;
+            var up = cameraRotation * Vector3.up;
+            var forward = cameraRotation * Vector3.forward;
+            return new Vector3(
+                Mathf.Abs(right.x) * cameraSize.x + Mathf.Abs(up.x) * cameraSize.y + Mathf.Abs(forward.x) * cameraSize.z,
+                Mathf.Abs(right.y) * cameraSize.x + Mathf.Abs(up.y) * cameraSize.y + Mathf.Abs(forward.y) * cameraSize.z,
+                Mathf.Abs(right.z) * cameraSize.x + Mathf.Abs(up.z) * cameraSize.y + Mathf.Abs(forward.z) * cameraSize.z);
         }
 
 

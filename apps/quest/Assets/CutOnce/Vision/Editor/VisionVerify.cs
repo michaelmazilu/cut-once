@@ -168,6 +168,7 @@ public static class VisionVerify
             $"30 sightings -> {(one ? "1" : tracker.Objects.Count.ToString())} object, distant one separate={two}, promoted={tracked.visible}, smoothed={tracked.smoothedWorldPosition}");
 
         // ---------- 9 + 10 + 11. visuals ----------
+        VisionDebug.Enabled = false;
         scanner.Visualizer.Show(tracked);
         var visual = tracked.visual;
         var highlight = visual != null ? visual.transform.Find("Highlight") : null;
@@ -177,20 +178,30 @@ public static class VisionVerify
 
         var block = new MaterialPropertyBlock();
         renderer?.GetPropertyBlock(block);
-        // The highlight is the hologram shader now (thin edges + faint fill), not RoomSense's grid
-        // material: check the edge colour, and that the grid the old look used stays OFF.
-        var edge = renderer != null ? block.GetColor(Shader.PropertyToID("_EdgeColor")) : Color.black;
-        var grid = renderer != null ? block.GetFloat(Shader.PropertyToID("_Grid")) : 1f;
-        var isBlue = edge.b > edge.r && edge.b > 0.4f;
+        var tint = renderer != null ? block.GetColor(Shader.PropertyToID("_Tint")) : Color.black;
+        var liveSurface = scanner.Visualizer.HasLiveSurfaceDepth;
+        var correctHighlight = renderer != null && (liveSurface
+            ? renderer.enabled && shaderName == "CutOnce/SurfaceGlow" && tint.b > tint.r && tint.a > 0f
+            : !renderer.enabled);
         var hCol = highlight != null ? highlight.GetComponent<Collider>() : null;
         var colliderInert = hCol == null || !hCol.enabled;
         var sized = visual != null && visual.transform.localScale.x <= 1.21f; // locator clamps every axis
-        Check("SUBTLE HIGHLIGHT", highlight != null && renderer != null && isBlue && grid < 0.5f && colliderInert && sized,
-            $"shader={shaderName} edge={edge} grid={grid} colliderInert={colliderInert} scale={visual?.transform.localScale}");
+        Check("SURFACE ONLY HIGHLIGHT", highlight != null && correctHighlight && colliderInert && sized,
+            $"depth={liveSurface} shader={shaderName} rendered={renderer != null && renderer.enabled} colliderInert={colliderInert}");
 
         var text = labelT != null ? labelT.GetComponent<TextMesh>() : null;
         Check("YOLO LABEL", text != null && text.text.Contains("CHAIR"),
             text != null ? $"\"{text.text}\" (from YOLO class {chair.classId}, not RoomSense)" : "no label");
+        Check("HONEST NO DEPTH LABEL", liveSurface || (text != null && text.text.Contains("DEPTH UNAVAILABLE")));
+
+        VisionDebug.Enabled = true;
+        scanner.Visualizer.Show(tracked);
+        Check("DEBUG BOUNDS OPT IN", renderer != null && renderer.enabled
+            && renderer.sharedMaterial.shader.name == "CutOnce/Hologram");
+        VisionDebug.Enabled = false;
+        scanner.Visualizer.Show(tracked);
+        Check("DEBUG BOUNDS REMOVED", renderer != null && (liveSurface
+            ? renderer.sharedMaterial.shader.name == "CutOnce/SurfaceGlow" : !renderer.enabled));
 
         // ---------- 12. label/highlight live in world space ----------
         var before = visual.transform.position;

@@ -2,7 +2,9 @@
 
 The `Quest Mac build` workflow runs the repository's setup, readiness/EditMode
 checks, and APK build on an already licensed Mac. It uploads logs, test results,
-generated XR settings, the package lock, and the APK. It does not merge commits.
+generated XR settings, the package lock, and the APK. It also renders the actual
+surface shader against synthetic depth, checks object/empty/background pixels,
+and uploads before/after PNGs and a JSON report. It does not merge commits.
 
 ## One-time Mac setup
 
@@ -25,8 +27,8 @@ bash tools/quest/setup-mac-runner.sh
 ```
 
 The script downloads the official runner, verifies its published checksum, and
-registers it with label `cutonce-unity`. It uses `~/actions-runner-cutonce/_work`
-for a separate checkout, leaving your existing Unity project alone. Keep the
+registers it with label `cutonce-unity`. Each job uses a fresh directory under
+`~/actions-runner-cutonce/_work` for a separate checkout, leaving your existing Unity project alone. Keep the
 terminal open and Mac logged in, on power, with its lid open. `caffeinate` prevents
 idle sleep; it does not overcome lid-close sleep. Ctrl-C stops the runner. Run the
 same script again to start an already registered runner. No background service
@@ -60,4 +62,6 @@ Review and commit generated settings/lock-file changes from diagnostics when
 needed; CI does not commit them automatically. Build evidence applies to the
 tested commit plus the captured setup-generated settings. A successful build is
 not a headset visual test. Live depth, passthrough appearance, and performance
-still require a Quest. Simulator GUI testing is not part of this batch workflow.
+still require a Quest. The synthetic depth render proves shader behavior on known
+geometry, not detector accuracy or live depth quality. Simulator GUI testing is
+not part of this batch workflow.

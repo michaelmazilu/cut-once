@@ -39,7 +39,10 @@ namespace CutOnce.Vision
                 if (Detector != null && !string.IsNullOrEmpty(Detector.LastError)) return "detector error: " + Detector.LastError;
                 if (Camera == null || !Camera.IsReady) return _status;
                 if (Detector == null || !Detector.ModelLoaded) return "camera up, model not loaded yet";
-                if (!Locator.IsSupported) return "scanning (no depth — objects sit on the room's surfaces, not on themselves)";
+                if (VisionDebug.Enabled) return "scanning — diagnostic boxes enabled (hold both thumbsticks to hide)";
+                if (Visualizer == null || !Visualizer.HasLiveSurfaceDepth)
+                    return "scanning — surface depth unavailable; labels only (no box highlights)";
+                if (!Locator.IsSupported) return "scanning — surface depth ready; object positioning unavailable";
                 return $"scanning — {Detector.InferencesPerSecond:0.0}/s, {Tracker.VisibleCount} objects";
             }
         }

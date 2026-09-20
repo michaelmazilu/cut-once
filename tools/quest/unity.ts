@@ -6,6 +6,7 @@
  *   pnpm quest:sim       run the baseline scene in Meta XR Simulator and report what it provides
  *   pnpm quest:play      open the app in Meta XR Simulator (Play mode) and leave it running for you
  *   pnpm quest:build     build the APK the headset installs (apps/quest/Builds/CutOnce.apk)
+ *   pnpm quest:surface-proof render and verify the surface shader against synthetic measured depth
  *   pnpm quest:install   install that APK on a Quest plugged in by USB-C and start it
  *
  * The Editor must be closed: Unity allows one instance per project. With it open, the Cut Once menu runs the
@@ -291,6 +292,17 @@ function build(): number {
   return 0;
 }
 
+/** Uses the real production shader and known geometry; this is not a live-headset capture. */
+function surfaceProof(): number {
+  const report = join(LOGS, "surface-proof", "report.json");
+  fresh(report);
+  const r = unity("surface-proof", ["-executeMethod", "CutOnce.Vision.Editor.SurfacePaintProof.Run"], { graphics: true, minutes: 15 });
+  if (r.code !== 0) return r.code;
+  if (!existsSync(report)) { console.error("Surface render proof wrote no report."); return 1; }
+  console.log(`Surface render evidence: ${join(LOGS, "surface-proof")}`);
+  return 0;
+}
+
 /** Installs without pre-granting permissions, so the headset asks for the camera and microphone as it will at the demo. */
 function install(): number {
   if (!existsSync(APK)) { console.error("No APK yet. Run pnpm quest:build first."); return 1; }
@@ -308,7 +320,7 @@ function install(): number {
   return 0;
 }
 
-const commands: Record<string, () => number> = { setup, check, sim, play, build, install };
+const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const name = process.argv[2] ?? "";
   const cmd = commands[name];

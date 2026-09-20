@@ -4,10 +4,10 @@ namespace CutOnce.Vision
     /// One switch between the two ways the scanner can look.
     ///
     /// NORMAL (default, what a judge sees): passthrough, a subtle highlight on each recognised
-    /// object, and a small label with its name. Nothing else — no room mesh, no grids, no boxes,
-    /// no confidence numbers. The room looks like the room.
+    /// object, and a small label with its name. The blue fill, fine surface grid and rim follow
+    /// measured real surfaces. Without live depth, only labels appear; no proxy boxes are drawn.
     ///
-    /// DEBUG (opt-in): the same view plus the numbers — confidence, tracked id, size — on every
+    /// DEBUG (opt-in): diagnostic detection bounds plus confidence, tracked id and size on every
     /// label. Toggled on device by clicking BOTH thumbsticks in and holding for a second, or set
     /// from code or the Inspector before a session.
     ///
