@@ -14,12 +14,15 @@ existing simulator-update warning. Verification ladder: steps 1–3 plus explici
 recorded-image/GPU fixtures; not a live simulator session or step 5 headset proof.
 The last Mac USB probe (`35499599170`) found no connected devices.
 
-Pending follow-up: `2f97de5` adds direct asynchronous camera snapshots and
-25 lifecycle regressions, plus sRGB/UNorm GPU snapshot checks. Its normal build
-[35502199954](https://github.com/michaelmazilu/kitbash/actions/runs/35502199954)
-is queued. The preceding candidate run `35501459393` lost communication with the
-Mac runner during setup; it did not complete Unity tests. These new changes are
-not included in the last verified APK above, and their Mac gates remain pending.
+Pending follow-ups: `2f97de5` adds direct asynchronous camera snapshots and
+25 lifecycle regressions, plus sRGB/UNorm GPU snapshot checks. `6ce5bf2` also
+contains the scanner-lifetime correction below. Its normal build
+[35503713472](https://github.com/michaelmazilu/kitbash/actions/runs/35503713472)
+is queued. The older queued run `35502199954` was cancelled before starting
+because this newer runtime revision supersedes it. Candidate run `35501459393`
+lost communication with the Mac runner during setup; it did not complete Unity
+tests. These changes are not included in the last verified APK above, and their
+Mac gates remain pending.
 
 The subsequent scanner-lifetime fix keeps the automatic loop and submitted
 inference alive through scanner/parent disable, draining before worker reuse or
