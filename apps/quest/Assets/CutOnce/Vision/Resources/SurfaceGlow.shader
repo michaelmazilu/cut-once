@@ -11,6 +11,7 @@ Shader "CutOnce/SurfaceGlow"
         _EdgeStrength ("Measured silhouette strength", Range(0,1)) = 0.75
         _MinDepth ("Nearest reliable surface (metres)", Float) = 0.2
         _MaxDepth ("Farthest surface (metres)", Float) = 6.0
+        _DepthTolerance ("Virtual surface depth tolerance (metres)", Float) = 0.015
     }
     SubShader
     {
@@ -32,7 +33,7 @@ Shader "CutOnce/SurfaceGlow"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _Tint;
-                float _GridSpacing, _GridStrength, _EdgeStrength, _MinDepth, _MaxDepth;
+                float _GridSpacing, _GridStrength, _EdgeStrength, _MinDepth, _MaxDepth, _DepthTolerance;
             CBUFFER_END
 
             struct Attributes
@@ -140,8 +141,11 @@ Shader "CutOnce/SurfaceGlow"
                 float strength = saturate(_Tint.a * (1 + grid * _GridStrength + edge * _EdgeStrength));
                 o.colour = half4(lerp(_Tint.rgb, half3(0.6, 0.92, 1), edge * 0.5), strength);
 
-                // Test virtual occluders at the measured surface, not the proxy's back face.
-                float4 clipPosition = TransformWorldToHClip(surfacePosition - ray * 0.002);
+                // Depth texels cover multiple display pixels: even a perfectly flat real
+                // surface reconstructs a few millimetres behind an exact virtual mesh at
+                // some pixels. Use a metric tolerance to prevent stippled self-occlusion.
+                // Surface selection above still uses the unmodified measured position.
+                float4 clipPosition = TransformWorldToHClip(surfacePosition - ray * max(_DepthTolerance, 0.001));
                 o.depth = clipPosition.z / clipPosition.w;
             #if !UNITY_REVERSED_Z
                 o.depth = (o.depth - UNITY_NEAR_CLIP_VALUE) / (1 - UNITY_NEAR_CLIP_VALUE);
