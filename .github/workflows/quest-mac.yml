@@ -19,26 +19,30 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: quest-build
+        working-directory: ${{ env.QUEST_BUILD_ROOT }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: quest-build
-          # An unrelated gitlink has no .gitmodules entry. Keep it out of this checkout.
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/hole/
-          lfs: true
-          persist-credentials: false
+      - name: Check out requested commit
+        working-directory: ${{ github.workspace }}
+        run: |
+          # The public repo contains a gitlink without .gitmodules. Plain Git avoids
+          # checkout action's recursive submodule credential cleanup, which fails on it.
+          build_root=$(mktemp -d "$RUNNER_TEMP/quest-build.XXXXXX")
+          echo "QUEST_BUILD_ROOT=$build_root" >> "$GITHUB_ENV"
+          git init "$build_root"
+          cd "$build_root"
+          git remote add origin https://github.com/michaelmazilu/kitbash.git
+          git lfs install --local
+          git -c credential.helper= fetch --depth=1 origin "$GITHUB_SHA"
+          git -c credential.helper= checkout --detach FETCH_HEAD
+          git -c credential.helper= lfs pull
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: quest-build/package.json
+          package_json_file: ${{ env.QUEST_BUILD_ROOT }}/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: quest-build/pnpm-lock.yaml
+          cache-dependency-path: ${{ env.QUEST_BUILD_ROOT }}/pnpm-lock.yaml
       - name: Check Unity installation
         run: |
           version=$(sed -n 's/^m_EditorVersion: //p' apps/quest/ProjectSettings/ProjectVersion.txt | tr -d '\r')
@@ -66,13 +70,13 @@ jobs:
           name: quest-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
           path: |
-            quest-build/apps/quest/Logs/cli/
-            quest-build/apps/quest/Assets/XR/
-            quest-build/apps/quest/Packages/packages-lock.json
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Assets/XR/
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Packages/packages-lock.json
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: quest-apk-${{ github.sha }}-${{ github.run_attempt }}
-          path: quest-build/apps/quest/Builds/CutOnce.apk
+          path: ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Builds/CutOnce.apk
           if-no-files-found: error
           retention-days: 7
