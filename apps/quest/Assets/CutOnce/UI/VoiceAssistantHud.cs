@@ -29,7 +29,7 @@ namespace CutOnce.UI
             var canvas = go.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.sortingOrder = 20;
-            go.AddComponent<CanvasScaler>().dynamicPixelsPerUnit = 4f;
+            VrTextQuality.AddScaler(go);
             var rect = (RectTransform)go.transform;
             rect.sizeDelta = new Vector2(Width, 80f);
             rect.localScale = Vector3.one * MetresPerUnit;

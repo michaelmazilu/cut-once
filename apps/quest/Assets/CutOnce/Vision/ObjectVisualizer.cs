@@ -41,8 +41,11 @@ namespace CutOnce.Vision
         [Header("Surface paint (on device, where live depth exists)")]
         [Tooltip("Scale-up of the box for painting, so a snug detection never clips the object's silhouette.")]
         public float surfacePad = 1.2f;
-        [Range(0f, 1f)] public float surfaceAlpha = 0.6f;
-        [Range(0f, 1f)] public float focusSurfaceAlpha = 0.95f;
+        [Tooltip("How much passthrough the glow replaces. Low on purpose: the real object must stay visible under it.")]
+        [Range(0f, 1f)] public float surfaceAlpha = 0.35f;
+        [Range(0f, 1f)] public float focusSurfaceAlpha = 0.5f;
+        [Tooltip("Metres the paint box's bottom sits above the object's bottom, so the desk it stands on is outside the box.")]
+        public float surfaceLift = 0.015f;
 
         [Header("Label")]
         public float labelGap = 0.04f;      // metres above the top of the highlight
@@ -57,13 +60,14 @@ namespace CutOnce.Vision
             public MeshRenderer highlight;
             public TextMesh text, shadow;
             public string lastName;
-            public bool lastFocused, lastDebug;
+            public bool lastFocused, lastDebug, surfaceOn;
             public float nextDebugRefresh;
         }
         private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _visuals = new();
         private Transform _camera;
         private Material _material;
         private Material _surface;      // null = no live depth here; the box look is used instead
+        private EnvironmentDepthManager _depth;
         private MaterialPropertyBlock _props;
 
         private static readonly int FillColor = Shader.PropertyToID("_FillColor");
@@ -99,6 +103,7 @@ namespace CutOnce.Vision
                 var depth = FindAnyObjectByType<EnvironmentDepthManager>();
                 if (depth == null) depth = gameObject.AddComponent<EnvironmentDepthManager>();
                 depth.OcclusionShadersMode = OcclusionShadersMode.SoftOcclusion;
+                _depth = depth;
                 var paint = Resources.Load<Shader>("SurfaceGlow");
                 if (paint != null) _surface = new Material(paint) { name = "Vision surface paint (shared)" };
                 else Debug.LogError("[Vision] SurfaceGlow shader missing from Resources; using the box look.");
@@ -119,16 +124,26 @@ namespace CutOnce.Vision
             var follow = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
             t.position = Vector3.Lerp(t.position, o.DisplayCentre, follow);
             var cube = cached.highlight.transform;
-            var targetSize = _surface != null ? o.DisplaySize * surfacePad : o.DisplaySize;
+            // Depth is supported but arrives late (first seconds, after sleep). Until it does, and
+            // whenever it drops, this object wears the box look; the moment it is back, the paint.
+            var paintNow = _surface != null && _depth != null && _depth.IsDepthAvailable;
+            var targetSize = paintNow ? o.DisplaySize * surfacePad : o.DisplaySize;
             cube.localScale = Vector3.Lerp(cube.localScale, targetSize, follow);
             // The turn goes on the cube for the same reason the size does: the label is a sibling and must stay
             // upright and facing the viewer. A box on a desk is turned, never tipped, so yaw is the only axis.
             cube.localRotation = Quaternion.Slerp(cube.localRotation, Quaternion.Euler(0f, o.DisplayYawDeg, 0f), follow);
+            // The padding grows sideways and upward only, and the bottom is lifted a touch: the desk a
+            // bottle stands on must be outside the box, or the paint draws a slab of desk under it. The lift is
+            // along the ROOT's up, which the yaw above never tilts, so a turned box still sits on the desk.
+            var lift = paintNow ? surfaceLift : 0f;
+            cube.localPosition = new Vector3(0f, (cube.localScale.y - o.DisplaySize.y) * 0.5f + lift, 0f);
 
-            if (cached.lastFocused != focused)
+            if (cached.lastFocused != focused || cached.surfaceOn != paintNow)
             {
                 cached.lastFocused = focused;
-                Style(cached.highlight, focused);
+                cached.surfaceOn = paintNow;
+                cached.highlight.sharedMaterial = paintNow ? _surface : _material;
+                Style(cached.highlight, focused, paintNow);
             }
 
             // Rebuilt only when something changed (rule 10: no strings every frame). In debug mode the
@@ -147,7 +162,7 @@ namespace CutOnce.Vision
             }
 
             // The label sits just above the highlight's top face, whatever size the object is.
-            cached.label.localPosition = new Vector3(0f, cube.localScale.y * 0.5f + labelGap, 0f);
+            cached.label.localPosition = new Vector3(0f, cube.localPosition.y + cube.localScale.y * 0.5f + labelGap, 0f);
 
             // Billboard: face the headset, upright, so text is never mirrored or tilted.
             if (_camera == null && Camera.main != null) _camera = Camera.main.transform;
@@ -184,10 +199,10 @@ namespace CutOnce.Vision
             o.visual = null;
         }
 
-        private void Style(MeshRenderer renderer, bool focused)
+        private void Style(MeshRenderer renderer, bool focused, bool surface)
         {
             if (renderer == null) return;
-            if (_surface != null)
+            if (surface)
             {
                 // Surface mode: the paint IS the highlight. No edges, no fill, no grid — the object's
                 // own silhouette carries the colour; focus just turns the paint up.
@@ -230,7 +245,7 @@ namespace CutOnce.Vision
             var collider = box.GetComponent<Collider>();
             if (collider != null) { collider.enabled = false; Destroy(collider); }
             var renderer = box.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = _surface != null ? _surface : _material;
+            renderer.sharedMaterial = _material;   // Show() swaps to the paint once depth is available
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
 
@@ -265,7 +280,7 @@ namespace CutOnce.Vision
 
             var cached = new Cached { transform = root.transform, label = labelGo.transform, highlight = renderer, text = text, shadow = shadow };
             _visuals[root] = cached;
-            Style(renderer, focused: false);
+            Style(renderer, focused: false, surface: false);
             return root;
         }
 

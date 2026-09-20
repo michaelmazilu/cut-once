@@ -1,6 +1,6 @@
 {
   "name": "CutOnce.Room",
   "rootNamespace": "CutOnce.Room",
-  "references": ["Oculus.VR", "meta.xr.mrutilitykit", "CutOnce.AR", "Unity.ugui", "Unity.InputSystem"],
+  "references": ["Oculus.VR", "meta.xr.mrutilitykit", "CutOnce.AR", "CutOnce.UI", "Unity.ugui", "Unity.InputSystem"],
   "autoReferenced": true
 }

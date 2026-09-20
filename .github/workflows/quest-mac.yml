@@ -1,0 +1,84 @@
+name: Quest Mac build
+
+# This public repo must never run fork PR code on a teammate's Mac automatically.
+# Dispatch only a branch/commit you have reviewed and trust.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quest-mac
+  cancel-in-progress: false
+
+jobs:
+  quest:
+    runs-on: [self-hosted, macOS, cutonce-unity]
+    timeout-minutes: 120
+    env:
+      QUEST_BUILD_ROOT: ${{ github.workspace }}/quest-build-${{ github.run_id }}-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/quest-build-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out requested commit
+        working-directory: ${{ github.workspace }}
+        run: |
+          # The public repo contains a gitlink without .gitmodules. Plain Git avoids
+          # checkout action's recursive submodule credential cleanup, which fails on it.
+          build_root="$QUEST_BUILD_ROOT"
+          mkdir "$build_root"
+          git init "$build_root"
+          cd "$build_root"
+          git remote add origin https://github.com/michaelmazilu/kitbash.git
+          git lfs install --local
+          git -c credential.helper= fetch --depth=1 origin "$GITHUB_SHA"
+          git -c credential.helper= checkout --detach FETCH_HEAD
+          git -c credential.helper= lfs pull
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: quest-build-${{ github.run_id }}-${{ github.run_attempt }}/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ${{ env.QUEST_BUILD_ROOT }}/pnpm-lock.yaml
+      - name: Check Unity installation
+        run: |
+          version=$(sed -n 's/^m_EditorVersion: //p' apps/quest/ProjectSettings/ProjectVersion.txt | tr -d '\r')
+          editor="/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+          test -x "$editor" || { echo "Install Unity $version and Android Build Support through Unity Hub."; exit 1; }
+          echo "UNITY_PATH=$editor" >> "$GITHUB_ENV"
+          echo "Building commit $GITHUB_SHA with Unity $version" >> "$GITHUB_STEP_SUMMARY"
+      - run: pnpm install --frozen-lockfile
+      - name: Apply Quest settings
+        run: caffeinate -i pnpm quest:setup
+      - name: Compile, test, and check Quest readiness
+        run: caffeinate -i pnpm quest:check
+      - name: Build Android APK
+        run: caffeinate -i pnpm quest:build
+      - name: Capture generated settings changes
+        if: always()
+        run: |
+          mkdir -p apps/quest/Logs/cli
+          git diff --binary -- apps/quest/Assets/XR apps/quest/ProjectSettings apps/quest/Packages > apps/quest/Logs/cli/generated-settings.patch
+          git status --short >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload logs and generated settings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          path: |
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Assets/XR/
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Packages/packages-lock.json
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-apk-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Builds/CutOnce.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -100,6 +100,12 @@ namespace CutOnce.QuestTools
                 if (settings == null) { Add(f, Level.Error, "xr", $"OpenXR has no settings for {who}."); continue; }
                 Expect(f, "xr", settings.GetFeatures().Any(x => x.enabled && x.GetType().FullName == QuestSetup.MetaXRFeature),
                     $"The Meta XR feature must be on in OpenXR for {who}.");
+                // The depth texture (the object highlight's surface paint) exists only through these two. Run
+                // `Cut Once > Apply Quest 3 settings` (pnpm quest:setup) after pulling; it turns them on.
+                Expect(f, "xr", settings.GetFeatures().Any(x => x.enabled && x.GetType().FullName == QuestSetup.MetaOpenXROcclusionFeature),
+                    $"The 'Meta Quest: Occlusion' feature (com.unity.xr.meta-openxr) must be on for {who}: without it there is no depth texture and object highlights fall back to boxes. Run Apply Quest 3 settings.");
+                Expect(f, "xr", settings.GetFeatures().Any(x => x.enabled && x.GetType().FullName == QuestSetup.MetaOpenXRSessionFeature),
+                    $"The 'Meta Quest: Session' feature must be on for {who}: Occlusion's own validation requires it.");
                 Expect(f, "xr", settings.renderMode == OpenXRSettings.RenderMode.SinglePassInstanced,
                     $"Render mode must be Single Pass Instanced for {who}: multi-pass draws everything twice.");
                 if (group == BuildTargetGroup.Android)

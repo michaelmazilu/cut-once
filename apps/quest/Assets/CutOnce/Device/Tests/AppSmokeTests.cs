@@ -44,6 +44,33 @@ namespace CutOnce.Device.PlayTests
             foreach (var name in new[] { "[BuildTwins]", "[BuildIdeas]" }) { var left = GameObject.Find(name); if (left != null) UnityEngine.Object.Destroy(left); }
         }
 
+        [Test]
+        public void ActiveBuildHudOnlyShowsObjectProgressAndControls()
+        {
+            var hud = HudController.Create(null);
+            try
+            {
+                var plan = new CutOnce.Core.PlanDto { name = "Workbench" };
+                plan.parts.Add(new CutOnce.Core.PartDto { part_id = "top", name = "Top" });
+                var state = new CutOnce.Core.BuildStateDto();
+                state.progress.pct = 40;
+
+                hud.ShowState(plan, state, new System.Collections.Generic.List<CutOnce.Core.MaterialLine>(),
+                    Array.Empty<CutOnce.Core.BuildEventDto>(), "1:200");
+
+                Assert.That(hud.transform.Find("title").GetComponent<UnityEngine.UI.Text>().text, Is.EqualTo("Workbench"));
+                Assert.That(hud.transform.Find("bar").gameObject.activeSelf, Is.True);
+                Assert.That(hud.transform.Find("bar").GetComponent<RectTransform>().sizeDelta.x, Is.EqualTo(166.4f).Within(.01f));
+                Assert.That(hud.transform.Find("hint").GetComponent<UnityEngine.UI.Text>().text, Does.Contain("B: mark / undo"));
+                hud.ShowPlacement("Visible surfaces match.");
+                hud.ShowStatus("Online", "Looking for the saved position…");
+                Assert.That(hud.transform.Find("hint").GetComponent<UnityEngine.UI.Text>().text, Does.Not.Contain("saved position"));
+                foreach (var hidden in new[] { "status", "progress", "step title", "step body", "part", "answer", "placement", "toast" })
+                    Assert.That(hud.transform.Find(hidden).gameObject.activeSelf, Is.False, hidden + " should not clutter an active build");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(hud.gameObject); }
+        }
+
         [UnityTest]
         public IEnumerator OfflineWithNoJournalTheAppComesUpEmptyAndSaysWhatToDo()
         {
@@ -60,9 +87,15 @@ namespace CutOnce.Device.PlayTests
                 Assert.That(assembly, Is.Not.Null, "no AssemblyRoot was created");
                 Assert.That(assembly.Views.Count, Is.EqualTo(0), "the app ships no plan: nothing is drawn until Kit builds something");
                 Assert.That(UnityEngine.Object.FindAnyObjectByType<HudController>(), Is.Not.Null);
+                Assert.That(GameObject.Find("[HUD]").GetComponent<UnityEngine.UI.CanvasScaler>().dynamicPixelsPerUnit,
+                    Is.EqualTo(12f), "the distant task HUD needs more font detail than the near voice HUD");
+                Assert.That(GameObject.Find("[HUD]").transform.localScale.x, Is.EqualTo(.0013f),
+                    "the distant task HUD must stay large enough to read behind a build");
                 var status = GameObject.Find("[HUD]").transform.Find("status").GetComponent<UnityEngine.UI.Text>().text;
                 var voiceHud = UnityEngine.Object.FindAnyObjectByType<VoiceAssistantHud>();
                 Assert.That(voiceHud, Is.Not.Null, "the voice assistant needs its own always-visible HUD");
+                Assert.That(voiceHud.GetComponent<UnityEngine.UI.CanvasScaler>().dynamicPixelsPerUnit,
+                    Is.EqualTo(8f), "the voice HUD must rasterise text at VR-readable resolution");
                 var hint = voiceHud.transform.Find("hint").GetComponent<UnityEngine.UI.Text>().text;
                 // Kit's instructions belong to the view-locked voice HUD, not the task panel beside a table or build.
                 Assert.That(hint, Does.Contain("A"), "the voice HUD must name the button that talks to Kit");

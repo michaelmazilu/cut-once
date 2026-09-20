@@ -19,7 +19,7 @@ namespace CutOnce.UI
             go.transform.SetParent(parent, false);
             go.transform.position = worldPosition;
             var canvas = go.AddComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
-            go.AddComponent<CanvasScaler>().dynamicPixelsPerUnit = 4f;
+            VrTextQuality.AddScaler(go);
             var rect = (RectTransform)go.transform; rect.sizeDelta = new Vector2(320, 64); rect.localScale = Vector3.one * MetresPerUnit;
             var label = go.AddComponent<WorldLabel>();
             var t = new GameObject("text", typeof(RectTransform)).AddComponent<Text>();
