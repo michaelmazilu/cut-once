@@ -19,6 +19,25 @@ namespace CutOnce.RoomSense
     {
         public const string MaterialResource = "SheikahGlow";
 
+        /// <summary>Vision owns visible recognition; MRUK remains available for room geometry.</summary>
+        public static bool DetectedObjectsOnly { get; private set; }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRenderingPolicy() => DetectedObjectsOnly = false;
+
+        /// <summary>
+        /// Hide only RoomSense's visual layers. Existing objects are updated immediately; later
+        /// components and asynchronous room reloads read the same policy before drawing anything.
+        /// </summary>
+        public static void SetDetectedObjectsOnly(bool enabled)
+        {
+            DetectedObjectsOnly = enabled;
+            foreach (var glow in Object.FindObjectsByType<RoomGlow>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                glow.ApplyRenderingPolicy();
+            foreach (var gaze in Object.FindObjectsByType<GazeInspector>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                gaze.ApplyRenderingPolicy();
+        }
+
 #if !ROOMSENSE_NO_AUTOBOOT
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoBoot() => Install();
@@ -49,6 +68,7 @@ namespace CutOnce.RoomSense
             // The RoomSense demo can still opt into its full-room scan effect.
             glow.glowEverything = false;
             glow.glowLabelledShapes = false;
+            glow.RenderingEnabled = false;
             glow.pulseEvery = 0f;
             glow.glowMaterial = Resources.Load<Material>(MaterialResource);
             if (glow.glowMaterial == null)

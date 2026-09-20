@@ -66,9 +66,19 @@ namespace CutOnce.Vision
 
         /// <summary>Fold one located detection into the tracked set.</summary>
         public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize)
+            => Observe(detection, world, worldSize, null);
+
+        /// <summary>
+        /// Associate at most one detection with each track per batch. Pass the caller's observed-ID
+        /// set, adding each returned ID to it before the next call. Otherwise two nearby bottles
+        /// within the association radius can both update one track and one physical object vanishes.
+        /// Input detections must already be de-duplicated by NMS; this is one-to-one spatial tracking,
+        /// not a second object detector or proof that overlapping detections are distinct objects.
+        /// </summary>
+        public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize, ISet<int> observedIds)
         {
             var now = Time.time;
-            var match = FindNearest(detection.classId, world);
+            var match = FindNearest(detection.classId, world, observedIds);
 
             if (match == null)
             {
@@ -142,13 +152,14 @@ namespace CutOnce.Vision
             return Mathf.Min(associationDistance + associationPerMetre * range, associationMaxDistance);
         }
 
-        private TrackedObject FindNearest(int classId, Vector3 world)
+        private TrackedObject FindNearest(int classId, Vector3 world, ISet<int> observedIds)
         {
             TrackedObject best = null;
             var bestDistance = Reach(world);
             foreach (var o in _objects)
             {
                 if (o.classId != classId) continue;
+                if (observedIds != null && observedIds.Contains(o.id)) continue;
                 var d = Vector3.Distance(o.smoothedWorldPosition, world);
                 if (d > bestDistance) continue;
                 bestDistance = d;

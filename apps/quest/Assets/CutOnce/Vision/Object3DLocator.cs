@@ -225,7 +225,7 @@ namespace CutOnce.Vision
         /// </summary>
         public static Vector3 EstimateCameraSize(float width, float height, string className, float minimum, float ordinaryMaximum)
         {
-            var table = className == "dining table" || className == "table";
+            var table = className == "dining table" || className == "diningtable" || className == "table";
             var widthCap = table ? Mathf.Max(ordinaryMaximum, 3f) : ordinaryMaximum;
             var heightCap = table ? widthCap : className == "person" ? Mathf.Max(ordinaryMaximum, 2f) : ordinaryMaximum;
             width = Mathf.Clamp(width, minimum, widthCap);

@@ -2,6 +2,7 @@
   "name": "CutOnce.Vision",
   "rootNamespace": "CutOnce.Vision",
   "references": [
+    "CutOnce.RoomSense",
     "meta.xr.mrutilitykit",
     "Oculus.VR",
     "Unity.InferenceEngine",

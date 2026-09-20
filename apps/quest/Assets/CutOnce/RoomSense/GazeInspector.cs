@@ -23,6 +23,15 @@ namespace CutOnce.RoomSense
     [RequireComponent(typeof(RoomGlow))]
     public class GazeInspector : MonoBehaviour
     {
+        [SerializeField, Tooltip("Draw guessed gaze labels and scan highlights. Suppressed while Vision owns recognition.")]
+        private bool renderingEnabled = true;
+
+        public bool RenderingEnabled
+        {
+            get => renderingEnabled && !RoomSenseBootstrap.DetectedObjectsOnly;
+            set { renderingEnabled = value; ApplyRenderingPolicy(); }
+        }
+
         [Tooltip("Material for the highlighted object. Defaults to RoomGlow's glow material.")]
         public Material highlightMaterial;
         [Tooltip("Highlight tint — deliberately hotter than the ambient room glow so it reads as 'selected'.")]
@@ -68,6 +77,22 @@ namespace CutOnce.RoomSense
 
         /// <summary>Replace the naming strategy — this is the seam an on-device YOLO plugs into.</summary>
         public void SetNamer(IObjectNamer namer) => _namer = namer;
+
+        private void OnEnable() => ApplyRenderingPolicy();
+
+        private void OnDisable() => HideVisuals();
+
+        public void ApplyRenderingPolicy()
+        {
+            if (!isActiveAndEnabled || !RenderingEnabled) HideVisuals();
+        }
+
+        private void HideVisuals()
+        {
+            if (_highlightGo != null && _highlightGo.activeSelf) _highlightGo.SetActive(false);
+            if (_labelGo != null && _labelGo.activeSelf) _labelGo.SetActive(false);
+            _shownIsland = -2;
+        }
 
         private void Awake()
         {
@@ -159,6 +184,7 @@ namespace CutOnce.RoomSense
 
         private void Update()
         {
+            if (!RenderingEnabled) { HideVisuals(); return; }
             var cam = Camera.main;
             if (cam == null || _collider == null) return;
             if (Time.time < _nextCast) { FaceCamera(cam); return; }
@@ -270,11 +296,9 @@ namespace CutOnce.RoomSense
 
         private void Show(GazeTarget? target)
         {
-            if (target == null)
+            if (!RenderingEnabled || target == null)
             {
-                if (_highlightGo != null) _highlightGo.SetActive(false);
-                if (_labelGo != null) _labelGo.SetActive(false);
-                _shownIsland = -2;
+                HideVisuals();
                 return;
             }
 
@@ -338,14 +362,26 @@ namespace CutOnce.RoomSense
 
         private void Teardown()
         {
-            foreach (var m in _islandMeshes.Values) if (m != null) Destroy(m);
+            foreach (var m in _islandMeshes.Values) if (m != null) DestroyOwned(m);
             _islandMeshes.Clear();
-            if (_collider != null) Destroy(_collider.gameObject);
+            if (_collider != null) DestroyOwned(_collider.gameObject);
             _collider = null;
             _shownIsland = -2;
         }
 
-        private void OnDestroy() => Teardown();
+        private void OnDestroy()
+        {
+            HideVisuals();
+            Teardown();
+            if (_highlightGo != null) DestroyOwned(_highlightGo);
+            if (_labelGo != null) DestroyOwned(_labelGo);
+        }
+
+        private static void DestroyOwned(Object value)
+        {
+            if (Application.isPlaying) Destroy(value);
+            else DestroyImmediate(value);
+        }
     }
 
     /// <summary>What the gaze landed on, with everything a namer needs to identify it.</summary>

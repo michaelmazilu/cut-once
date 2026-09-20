@@ -55,6 +55,9 @@ namespace CutOnce.Vision
 
         private void Awake()
         {
+            // Also applies to a scanner added manually without going through Install().
+            CutOnce.RoomSense.RoomSenseBootstrap.SetDetectedObjectsOnly(true);
+
             // Self-heal if someone drops this component into a scene by hand without wiring assets.
             if (modelAsset == null) modelAsset = Resources.Load<Unity.InferenceEngine.ModelAsset>(RoomScannerBootstrap.ModelResource);
             if (labelsAsset == null) labelsAsset = Resources.Load<TextAsset>(RoomScannerBootstrap.LabelsResource);
@@ -103,7 +106,7 @@ namespace CutOnce.Vision
                 if (!Locator.TryLocate(d, cameraPose, out var world, out var worldSize)) continue;
 
                 located++;
-                var tracked = Tracker.Observe(d, world, worldSize);
+                var tracked = Tracker.Observe(d, world, worldSize, _observed);
                 _observed.Add(tracked.id);
 
                 if (shouldLog) Debug.Log($"Detected: {d.className} {d.confidence:0.00}  @ {world}");

@@ -27,8 +27,12 @@ namespace CutOnce.Vision
 
         public static RoomScanner Install()
         {
-            if (Instance != null) return Instance;
-            if (Object.FindFirstObjectByType<RoomScanner>() != null) return null;
+            if (Instance == null) Instance = Object.FindFirstObjectByType<RoomScanner>();
+            if (Instance != null)
+            {
+                CutOnce.RoomSense.RoomSenseBootstrap.SetDetectedObjectsOnly(true);
+                return Instance;
+            }
 
             // MRUK hands out ONE PassthroughCameraAccess per camera position, and the copilot reads the same camera
             // for its questions. It is shared, not contested: VisionCamera reuses whatever is in the scene, and
@@ -44,6 +48,10 @@ namespace CutOnce.Vision
                 return null;
             }
 
+            // Only recognized objects may draw blue. The room scan, anchors and colliders remain
+            // active in the background; boot order and later scene reloads cannot restore its glow.
+            CutOnce.RoomSense.RoomSenseBootstrap.SetDetectedObjectsOnly(true);
+
             // Inactive while we wire it: AddComponent on an ACTIVE object runs Awake synchronously,
             // so the component would read its fields before we had assigned them. Activating last
             // means every Awake sees a fully configured object.
@@ -55,47 +63,11 @@ namespace CutOnce.Vision
             var scanner = go.AddComponent<RoomScanner>();
             scanner.modelAsset = model;
             scanner.labelsAsset = labels;
-            go.AddComponent<RivalWatch>();
             go.SetActive(true);
             Instance = scanner;
 
             Debug.Log("[Vision] RoomScanner installed; requesting permissions.");
             return scanner;
-        }
-
-/// <summary>
-        /// RoomSense's gaze inspector may not exist yet when Install() runs — the order in which
-        /// RuntimeInitializeOnLoadMethod hooks run across classes is undefined — so keep looking for a few frames.
-        /// </summary>
-        private class RivalWatch : MonoBehaviour
-        {
-            private const int FramesToWatch = 20;
-
-            private IEnumerator Start()
-            {
-                var silencedGaze = false;
-
-                for (var i = 0; i < FramesToWatch; i++)
-                {
-                    foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
-                    {
-                        var type = mb.GetType();
-
-                        // RoomSense's gaze inspector names things from MRUK labels and bounding-box
-                        // size. That is a guess, not recognition, and two naming systems in one
-                        // headset is worse than one. Its room GLOW stays — that is what makes
-                        // everything in the room light up blue — only the guessed labels go, so
-                        // every name the user reads comes from the vision model.
-                        if (!silencedGaze && type.FullName == "CutOnce.RoomSense.GazeInspector")
-                        {
-                            mb.enabled = false;
-                            silencedGaze = true;
-                            Debug.Log("[Vision] RoomSense GazeInspector disabled: labels come from YOLO only. Room glow is untouched.");
-                        }
-                    }
-                    yield return null;
-                }
-            }
         }
 
         /// <summary>

@@ -29,6 +29,15 @@ namespace CutOnce.RoomSense
     /// </summary>
     public class RoomGlow : MonoBehaviour
     {
+        [SerializeField, Tooltip("Draw the room-wide demo overlay. Vision always suppresses it while it owns recognition.")]
+        private bool renderingEnabled = true;
+
+        public bool RenderingEnabled
+        {
+            get => renderingEnabled && !RoomSenseBootstrap.DetectedObjectsOnly;
+            set { renderingEnabled = value; ApplyRenderingPolicy(); }
+        }
+
         [Tooltip("Unlit, transparent, additive-ish material. RoomGlow drives its _PulseOrigin/_PulseRadius floats.")]
         public Material glowMaterial;
 
@@ -48,13 +57,33 @@ namespace CutOnce.RoomSense
         public float pulseEvery = 6f;
 
         private readonly List<GameObject> _spawned = new();
+        private readonly List<MeshRenderer> _renderers = new();
         private MaterialPropertyBlock _props;
         private float _pulseStartedAt = -999f;
         private Vector3 _pulseOrigin;
+        private bool _sceneLoaded, _overlayActive;
 
         private static readonly int PulseOriginId = Shader.PropertyToID("_PulseOrigin");
         private static readonly int PulseRadiusId = Shader.PropertyToID("_PulseRadius");
         private static readonly int TintId = Shader.PropertyToID("_Tint");
+
+        private void OnEnable() => ApplyRenderingPolicy();
+
+        private void OnDisable() => SetOverlayActive(false);
+
+        public void ApplyRenderingPolicy()
+        {
+            var active = isActiveAndEnabled && RenderingEnabled;
+            SetOverlayActive(active);
+            if (active && _sceneLoaded && _spawned.Count == 0) BuildOverlay();
+        }
+
+        private void SetOverlayActive(bool active)
+        {
+            _overlayActive = active;
+            foreach (var go in _spawned)
+                if (go != null && go.activeSelf != active) go.SetActive(active);
+        }
 
         private void Start()
         {
@@ -73,12 +102,12 @@ namespace CutOnce.RoomSense
 
         private void Update()
         {
+            if (_overlayActive != RenderingEnabled) ApplyRenderingPolicy();
+            if (!RenderingEnabled) return;
             if (pulseEvery > 0f && Time.time - _pulseStartedAt > pulseEvery) Pulse();
             var radius = (Time.time - _pulseStartedAt) * pulseSpeed;
-            foreach (var go in _spawned)
+            foreach (var r in _renderers)
             {
-                if (go == null) continue;
-                var r = go.GetComponent<MeshRenderer>();
                 if (r == null) continue;
                 r.GetPropertyBlock(_props);
                 _props.SetVector(PulseOriginId, _pulseOrigin);
@@ -89,8 +118,9 @@ namespace CutOnce.RoomSense
 
         private void BuildOverlay()
         {
-            foreach (var go in _spawned) Destroy(go);
-            _spawned.Clear();
+            _sceneLoaded = true;
+            ClearOverlay();
+            if (!isActiveAndEnabled || !RenderingEnabled) return;
 
             var room = MRUK.Instance.GetCurrentRoom();
             if (room == null) { Debug.LogWarning("[RoomGlow] no room: run Space Setup on the headset."); return; }
@@ -147,13 +177,16 @@ namespace CutOnce.RoomSense
             props.SetColor(TintId, baseColour);
             r.SetPropertyBlock(props);
             _spawned.Add(go);
+            _renderers.Add(r);
         }
 
         private void Prepare(GameObject go, MRUKAnchor anchor, Color tint)
         {
             go.name = $"[RoomGlow] {anchor.Label}";
             go.transform.SetParent(anchor.transform, false);
-            Destroy(go.GetComponent<Collider>()); // overlay only; must never eat the controller ray that selects parts
+            // Only the decorative primitive's collider is removed. MRUK's geometry stays intact.
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) { collider.enabled = false; DestroyOwned(collider); }
             var r = go.GetComponent<MeshRenderer>();
             r.sharedMaterial = glowMaterial;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -161,6 +194,7 @@ namespace CutOnce.RoomSense
             props.SetColor(TintId, tint);
             r.SetPropertyBlock(props);
             _spawned.Add(go);
+            _renderers.Add(r);
         }
 
         private Color ColourFor(MRUKAnchor anchor)
@@ -169,6 +203,22 @@ namespace CutOnce.RoomSense
             if ((label & (MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.CEILING | MRUKAnchor.SceneLabels.FLOOR)) != 0) return wallColour;
             if ((label & MRUKAnchor.SceneLabels.TABLE) != 0) return tableColour;
             return baseColour;
+        }
+
+        private void ClearOverlay()
+        {
+            foreach (var go in _spawned)
+                if (go != null) { go.SetActive(false); DestroyOwned(go); }
+            _spawned.Clear();
+            _renderers.Clear();
+        }
+
+        private void OnDestroy() => ClearOverlay();
+
+        private static void DestroyOwned(Object value)
+        {
+            if (Application.isPlaying) Destroy(value);
+            else DestroyImmediate(value);
         }
     }
 }

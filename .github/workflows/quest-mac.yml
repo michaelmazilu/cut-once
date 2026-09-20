@@ -59,6 +59,14 @@ jobs:
         run: caffeinate -i pnpm quest:check
       - name: Render and verify surface-wrap evidence
         run: caffeinate -i pnpm quest:surface-proof
+      - name: Upload surface-wrap screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-surface-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/surface-proof/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Build Android APK
         run: caffeinate -i pnpm quest:build
       - name: Capture generated settings changes

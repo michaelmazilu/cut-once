@@ -68,6 +68,7 @@ namespace CutOnce.Vision.Tests
         }
 
         [TestCase("dining table")]
+        [TestCase("diningtable")]
         [TestCase("table")]
         public void TablesKeepFullWidthAndFootprintEvenWhenSeenEdgeOn(string label)
         {

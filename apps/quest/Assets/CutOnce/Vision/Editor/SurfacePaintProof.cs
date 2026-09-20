@@ -19,6 +19,7 @@ namespace CutOnce.Vision.Editor
         private const int Width = 960, Height = 640;
         private const int DepthWidth = 480, DepthHeight = 320;
         private const int FixtureLayer = 30;
+        private const int OverlayLayer = 29;
         private const int Margin = 4;
         private const float PixelTolerance = 3f / 255f;
         private const float BlueThreshold = 12f / 255f;
@@ -28,6 +29,8 @@ namespace CutOnce.Vision.Editor
         private sealed class ProofReport
         {
             public string scope = "Synthetic fixture rendered by the production CutOnce/SurfaceGlow shader. " +
+                "Physical fixture color is rendered first; its depth is cleared before overlays, as with passthrough. " +
+                "A separate virtual card writes depth but is excluded from environment depth. " +
                 "Not a headset capture; does not validate live detection, depth noise, passthrough, stereo or frame time.";
             public string unity;
             public string graphics;
@@ -46,7 +49,7 @@ namespace CutOnce.Vision.Editor
         private sealed class ViewResult
         {
             public string name;
-            public string baseline, highlighted, noDepth, invalidDepth;
+            public string baseline, highlighted, noDepth, invalidDepth, virtualOccluderBaseline, virtualOccluderHighlighted;
             public float depthCameraOffsetMetres;
             public bool passed;
             public List<Check> checks = new List<Check>();
@@ -67,6 +70,8 @@ namespace CutOnce.Vision.Editor
             public GameObject root;
             public Camera camera;
             public Material paint;
+            public Renderer virtualCard;
+            public Collider virtualCardCollider;
             public readonly List<Renderer> proxies = new List<Renderer>();
             public readonly Dictionary<Collider, Surface> surfaces = new Dictionary<Collider, Surface>();
             public readonly List<Object> resources = new List<Object>();
@@ -168,6 +173,7 @@ namespace CutOnce.Vision.Editor
                 new Vector3(8f, .06f, 8f), new Color(.12f, .14f, .17f));
             AddProxy(fixture, "Table clipping bounds", new Vector3(0, .5725f, 0), new Vector3(1.95f, 1.135f, 1.04f));
             AddProxy(fixture, "Bottle clipping bounds", new Vector3(-.32f, 1.37f, -.08f), new Vector3(.22f, .56f, .22f));
+            AddVirtualCard(fixture);
 
             var cameraObject = new GameObject("Synthetic capture camera");
             cameraObject.transform.SetParent(fixture.root.transform);
@@ -214,7 +220,7 @@ namespace CutOnce.Vision.Editor
         {
             var item = GameObject.CreatePrimitive(PrimitiveType.Cube);
             item.name = name;
-            item.layer = FixtureLayer;
+            item.layer = OverlayLayer;
             item.transform.SetParent(fixture.root.transform);
             item.transform.position = position;
             item.transform.localScale = size;
@@ -224,6 +230,22 @@ namespace CutOnce.Vision.Editor
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
             fixture.proxies.Add(renderer);
+        }
+
+        private static void AddVirtualCard(Fixture fixture)
+        {
+            var item = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            item.name = "Virtual occluder (excluded from synthetic environment depth)";
+            item.layer = OverlayLayer;
+            item.transform.SetParent(fixture.root.transform);
+            item.transform.localScale = new Vector3(.18f, .28f, .015f);
+            var material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            material.SetColor("_BaseColor", new Color(.48f, .17f, .12f));
+            fixture.resources.Add(material);
+            fixture.virtualCard = item.GetComponent<Renderer>();
+            fixture.virtualCard.sharedMaterial = material;
+            fixture.virtualCard.enabled = false;
+            fixture.virtualCardCollider = item.GetComponent<Collider>();
         }
 
         private static ViewResult RenderView(Fixture fixture, string directory, string name, Vector3 eye, Vector3 target,
@@ -253,18 +275,23 @@ namespace CutOnce.Vision.Editor
                 highlighted = $"synthetic-{name}-02-surface-highlight.png",
                 noDepth = $"synthetic-{name}-03-depth-unavailable.png",
                 invalidDepth = $"synthetic-{name}-04-invalid-depth.png",
+                virtualOccluderBaseline = $"synthetic-{name}-05-virtual-occluder-baseline.png",
+                virtualOccluderHighlighted = $"synthetic-{name}-06-virtual-occluder-highlight.png",
                 depthCameraOffsetMetres = depthCameraOffset
             };
             Texture2D baseline = null, painted = null, noDepth = null, invalidDepth = null;
             try
             {
                 foreach (var proxy in fixture.proxies) proxy.enabled = false;
-                baseline = Capture(camera);
+                // This baseline omits the second pass. The no-depth comparisons below therefore
+                // also assert that URP preserves the first pass's color when it clears only depth.
+                baseline = Capture(camera, false);
                 Save(baseline, directory, result.baseline);
                 foreach (var proxy in fixture.proxies) proxy.enabled = true;
                 SetDepthKeywords(fixture.paint, true);
                 painted = Capture(camera);
                 Save(painted, directory, result.highlighted);
+                CheckVirtualOccluder(fixture, directory, result, baseline.GetPixels32(), painted.GetPixels32());
                 SetDepthKeywords(fixture.paint, false);
                 noDepth = Capture(camera);
                 Save(noDepth, directory, result.noDepth);
@@ -320,17 +347,28 @@ namespace CutOnce.Vision.Editor
             return texture;
         }
 
-        private static Texture2D Capture(Camera camera)
+        private static Texture2D Capture(Camera camera, bool renderOverlays = true)
         {
             var target = RenderTexture.GetTemporary(Width, Height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
             var previous = RenderTexture.active;
             try
             {
                 camera.targetTexture = target;
+                camera.cullingMask = 1 << FixtureLayer;
+                camera.clearFlags = CameraClearFlags.SolidColor;
                 var request = new RenderPipeline.StandardRequest { destination = target };
                 if (!RenderPipeline.SupportsRenderRequest(camera, request))
                     throw new InvalidOperationException("The active render pipeline does not support the surface-proof camera request.");
                 RenderPipeline.SubmitRenderRequest(camera, request);
+                if (renderOverlays)
+                {
+                    // A passthrough image has color but no Unity mesh depth. Keep the physical
+                    // fixture's color, clear its exact mesh depth, and draw only virtual objects.
+                    // Same 2D destination/mip zero: URP renders directly into this texture.
+                    camera.cullingMask = 1 << OverlayLayer;
+                    camera.clearFlags = CameraClearFlags.Depth;
+                    RenderPipeline.SubmitRenderRequest(camera, request);
+                }
                 RenderTexture.active = target;
                 var image = new Texture2D(Width, Height, TextureFormat.RGBA32, false);
                 image.ReadPixels(new Rect(0, 0, Width, Height), 0, 0);
@@ -340,8 +378,74 @@ namespace CutOnce.Vision.Editor
             finally
             {
                 camera.targetTexture = null;
+                camera.cullingMask = 1 << FixtureLayer;
+                camera.clearFlags = CameraClearFlags.SolidColor;
                 RenderTexture.active = previous;
                 RenderTexture.ReleaseTemporary(target);
+            }
+        }
+
+        private static void CheckVirtualOccluder(Fixture fixture, string directory, ViewResult result,
+            Color32[] physicalBaseline, Color32[] unoccludedHighlight)
+        {
+            var camera = fixture.camera;
+            var target = new Vector3(camera.transform.position.x > 0 ? .67f : -.67f, .55f, -.08f);
+            var towardEye = (camera.transform.position - target).normalized;
+            fixture.virtualCard.transform.position = target + towardEye * .12f;
+            fixture.virtualCard.transform.rotation = camera.transform.rotation;
+            fixture.virtualCard.enabled = true;
+            Physics.SyncTransforms();
+            Texture2D baseline = null, painted = null;
+            try
+            {
+                foreach (var proxy in fixture.proxies) proxy.enabled = false;
+                baseline = Capture(camera);
+                Save(baseline, directory, result.virtualOccluderBaseline);
+                foreach (var proxy in fixture.proxies) proxy.enabled = true;
+                painted = Capture(camera);
+                Save(painted, directory, result.virtualOccluderHighlighted);
+                var before = baseline.GetPixels32();
+                var after = painted.GetPixels32();
+                var cardPixels = new bool[Width * Height];
+                for (var y = 0; y < Height; y++)
+                for (var x = 0; x < Width; x++)
+                {
+                    var ray = camera.ViewportPointToRay(new Vector3((x + .5f) / Width, (y + .5f) / Height, 0));
+                    cardPixels[y * Width + x] = fixture.virtualCardCollider.Raycast(ray, out _, camera.farClipPlane);
+                }
+                var check = NewCheck("virtual-card-occludes-highlight-without-environment-depth", .99f);
+                for (var y = Margin; y < Height - Margin; y++)
+                for (var x = Margin; x < Width - Margin; x++)
+                {
+                    if (!cardPixels[y * Width + x]) continue;
+                    var interior = true;
+                    for (var dy = -Margin; dy <= Margin && interior; dy++)
+                    for (var dx = -Margin; dx <= Margin; dx++)
+                        if (!cardPixels[(y + dy) * Width + x + dx]) { interior = false; break; }
+                    if (!interior) continue;
+                    var ray = camera.ViewportPointToRay(new Vector3((x + .5f) / Width, (y + .5f) / Height, 0));
+                    // The synthetic depth must select a real table surface behind the card. A
+                    // background-only card would pass even if the shader ignored virtual depth.
+                    if (!Physics.Raycast(ray, out var physical, camera.farClipPlane, 1 << FixtureLayer,
+                            QueryTriggerInteraction.Ignore) || fixture.surfaces[physical.collider] != Surface.Table) continue;
+                    if (!fixture.virtualCardCollider.Raycast(ray, out var virtualHit, camera.farClipPlane)
+                        || physical.distance - virtualHit.distance < .05f) continue;
+                    // Positive control: the same surface pixel must actually glow without the
+                    // virtual card, so an unrelated rendering failure cannot pass this check.
+                    if ((unoccludedHighlight[y * Width + x].b - physicalBaseline[y * Width + x].b) / 255f
+                        < BlueThreshold) continue;
+                    Sample(check, Difference(before[y * Width + x], after[y * Width + x]) <= PixelTolerance);
+                }
+                check.matchingFraction = check.sampledPixels == 0 ? 0 : (float)check.matchingPixels / check.sampledPixels;
+                check.passed = check.sampledPixels >= 20 && check.matchingFraction >= check.requiredFraction;
+                result.checks.Add(check);
+            }
+            finally
+            {
+                fixture.virtualCard.enabled = false;
+                foreach (var proxy in fixture.proxies) proxy.enabled = true;
+                if (baseline != null) Object.DestroyImmediate(baseline);
+                if (painted != null) Object.DestroyImmediate(painted);
             }
         }
 

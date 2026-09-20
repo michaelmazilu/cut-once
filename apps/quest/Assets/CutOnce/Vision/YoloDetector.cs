@@ -93,7 +93,7 @@ namespace CutOnce.Vision
             if (labelsAsset == null) { Fail("no labels asset assigned (expected SentisYoloClasses.txt)"); return; }
 
             _labels = labelsAsset.text.Split('\n');
-            for (var i = 0; i < _labels.Length; i++) _labels[i] = _labels[i].Trim();
+            for (var i = 0; i < _labels.Length; i++) _labels[i] = NormalizeClassName(_labels[i]);
 
             try
             {
@@ -281,6 +281,23 @@ namespace CutOnce.Vision
         }
 
         private string ClassName(int id) => _labels != null && id >= 0 && id < _labels.Length ? _labels[id] : $"class{id}";
+
+        /// <summary>
+        /// The sample's COCO label file uses several concatenated legacy names. Normalize once when
+        /// loading, so labels read naturally and class-specific sizing uses the same vocabulary.
+        /// Class IDs stay unchanged: this does not add categories beyond the model's 80 COCO classes.
+        /// </summary>
+        public static string NormalizeClassName(string label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return "object";
+            return label.Trim() switch
+            {
+                "diningtable" => "dining table",
+                "tvmonitor" => "TV / monitor",
+                "pottedplant" => "potted plant",
+                _ => label.Trim(),
+            };
+        }
 
         private void Fail(string reason)
         {

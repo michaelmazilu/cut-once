@@ -11,7 +11,7 @@ Shader "CutOnce/SurfaceGlow"
         _EdgeStrength ("Measured silhouette strength", Range(0,1)) = 0.75
         _MinDepth ("Nearest reliable surface (metres)", Float) = 0.2
         _MaxDepth ("Farthest surface (metres)", Float) = 6.0
-        _DepthTolerance ("Virtual surface depth tolerance (metres)", Float) = 0.015
+        _DepthTolerance ("Virtual surface depth tolerance (metres)", Float) = 0.002
     }
     SubShader
     {
@@ -141,9 +141,8 @@ Shader "CutOnce/SurfaceGlow"
                 float strength = saturate(_Tint.a * (1 + grid * _GridStrength + edge * _EdgeStrength));
                 o.colour = half4(lerp(_Tint.rgb, half3(0.6, 0.92, 1), edge * 0.5), strength);
 
-                // Depth texels cover multiple display pixels: even a perfectly flat real
-                // surface reconstructs a few millimetres behind an exact virtual mesh at
-                // some pixels. Use a metric tolerance to prevent stippled self-occlusion.
+                // Passthrough itself writes no Unity depth. Test against virtual geometry at
+                // the measured surface, with only a small bias for coincident depth values.
                 // Surface selection above still uses the unmodified measured position.
                 float4 clipPosition = TransformWorldToHClip(surfacePosition - ray * max(_DepthTolerance, 0.001));
                 o.depth = clipPosition.z / clipPosition.w;
