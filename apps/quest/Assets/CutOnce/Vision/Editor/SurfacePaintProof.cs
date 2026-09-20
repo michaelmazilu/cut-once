@@ -68,7 +68,7 @@ namespace CutOnce.Vision.Editor
             public Camera camera;
             public Material paint;
             public readonly List<Renderer> proxies = new List<Renderer>();
-            public readonly Dictionary<int, Surface> surfaces = new Dictionary<int, Surface>();
+            public readonly Dictionary<Collider, Surface> surfaces = new Dictionary<Collider, Surface>();
             public readonly List<Object> resources = new List<Object>();
 
             public void Dispose()
@@ -207,7 +207,7 @@ namespace CutOnce.Vision.Editor
                 Object.DestroyImmediate(item.GetComponent<Collider>());
                 item.AddComponent<MeshCollider>().sharedMesh = item.GetComponent<MeshFilter>().sharedMesh;
             }
-            fixture.surfaces.Add(item.GetComponent<Collider>().GetInstanceID(), surface);
+            fixture.surfaces.Add(item.GetComponent<Collider>(), surface);
         }
 
         private static void AddProxy(Fixture fixture, string name, Vector3 position, Vector3 size)
@@ -356,7 +356,7 @@ namespace CutOnce.Vision.Editor
                 var index = y * Width + x;
                 var ray = fixture.camera.ViewportPointToRay(new Vector3((x + .5f) / Width, (y + .5f) / Height, 0));
                 if (Physics.Raycast(ray, out var hit, fixture.camera.farClipPlane, 1 << FixtureLayer, QueryTriggerInteraction.Ignore))
-                    labels[index] = fixture.surfaces[hit.collider.GetInstanceID()];
+                    labels[index] = fixture.surfaces[hit.collider];
                 // Assert clear pixels THROUGH the table's box, not merely unrelated image corners.
                 insideBounds[index] = fixture.proxies[0].bounds.IntersectRay(ray);
             }
