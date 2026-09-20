@@ -36,11 +36,13 @@ const kitUpload = () => {
 const post = (url: string, payload: object) => t.app.inject({ method: "POST", url, headers: auth, payload });
 
 describe("a scan of the kit", () => {
-  it("streams outlines, then names, then the laptop riser, then the final list", async () => {
+  it("streams outlines, then names, then the rules at once, then the final list", async () => {
     expect((await post("/v1/build/scans", kitUpload())).statusCode).toBe(202);
     await t.app.ctx.hooks.build!.idle();
     const kinds = seen.map((m) => (m.type === "build_inventory" ? `inventory:${m.inventory.labelled}` : m.type === "build_ideas" ? `ideas:${m.final}` : m.type));
-    expect(kinds).toEqual(["inventory:false", "inventory:true", "ideas:true"]);
+    // The first ideas list is the stored rules, sent the moment the objects have names so the headset has something
+    // to show while the design model thinks; the final one is what Kit settled on.
+    expect(kinds).toEqual(["inventory:false", "inventory:true", "ideas:false", "ideas:true"]);
     const last = seen.at(-1)!;
     expect(nameTwins).toHaveBeenCalledOnce();
     const named = seen.find((m) => m.type === "build_inventory" && m.inventory.labelled);

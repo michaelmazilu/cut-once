@@ -26,10 +26,14 @@ const input = { sessionId: "bsess_t", twins: pile, surfaces: [table], camera: [0
 const slow = (ms: number, ideas: object[]) => vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ideas }), ms)));
 
 describe("computeIdeas: Kit's designs, live first", () => {
-  it("asks the design model and offers its designs, made live, with no stored rule mixed in, in one final list", async () => {
+  it("offers the stored rules at once, then replaces them with its own designs, live, in the final list", async () => {
     const emitted: { ideas: BuildIdea[]; final: boolean }[] = [];
     const out = await computeIdeas(deps(), input, (ideas, final) => emitted.push({ ideas, final }));
-    expect(emitted.map((e) => e.final)).toEqual([true]);
+    // The first list is not final and comes from the rules: it is what fills the wait, which was 13.5 seconds of
+    // nothing on the headset. The final list is Kit's own, with no rule left in it.
+    expect(emitted.map((e) => e.final)).toEqual([false, true]);
+    expect(emitted[0]!.ideas.every((i) => i.source === "rule")).toBe(true);
+    expect(emitted[0]!.ideas.length).toBeGreaterThan(0);
     expect(out.map((i) => [i.title, i.source, i.made])).toEqual([["Can tower", "ai", "live"]]);
     expect(out[0]!.origin.position[1]).toBeCloseTo(0.74);
     expect(out[0]!.twin_of).toMatchObject({ part_o1: "o1" });

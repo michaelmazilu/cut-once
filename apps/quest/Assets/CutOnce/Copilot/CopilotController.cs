@@ -123,7 +123,7 @@ namespace CutOnce.Copilot
             Debug.LogWarning("[Copilot] " + error);
             _host.ShowAnswer(new CopilotResponseDto
             {
-                answer_text = "I couldn't answer that. Hold A and ask again.",
+                answer_text = "I couldn't answer that. Press A and ask again.",
                 needs_clarification = true, highlight_parts = new string[0], drawing_refs = new DrawingRefDto[0],
             });
         }

@@ -167,6 +167,12 @@ export async function computeIdeas(deps: IdeasDeps, input: IdeasInput, emit: (id
   // from any source beat repeats; repeats beat an empty list (a rethink whose only designs were shown already).
   let first: BuildIdea[] = [];
   if (deps.call) {
+    // Something to look at while the model thinks. The stored rules are local and already checked for stability, so
+    // they cost milliseconds; Kit's own designs replace them when they arrive. Measured on the headset, the gap
+    // between the objects being named and the designs appearing was 13.5 seconds of nothing, which in front of a
+    // judge reads as "it broke".
+    const now = fresh(fromRules());
+    if (now.length) emit(top3(now), false);
     const live = invent(deps, input, usable, byId, surface, canon);
     const settled = live.then((r) => ({ r }), (e: Error) => ({ e }));
     const early = await Promise.race([settled, sleep(deps.liveMs)]);

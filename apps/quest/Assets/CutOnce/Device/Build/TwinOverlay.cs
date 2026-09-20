@@ -27,9 +27,14 @@ namespace CutOnce.Device
             var named = _palette.StyleFor(new PartVisual { Base = BaseVisual.CURRENT_STEP });
             // Loud enough to read over real passthrough (the scan beat is a demo moment): the first
             // pass used 0.04/0.45 and the twins were nearly invisible on the headset.
-            named.grid = false; named.pulseHz = 0; named.fillAlpha = 0.12f; named.edgeAlpha = 0.9f; named.edgeWidthPx = 2.5;
+            // Amber, not the app's cyan: the room scanner draws every recognised object in cyan, and a viewer with
+            // both on screen cannot tell "Kit can see this" from "this is a piece of what you are making". Warm means
+            // yours to pick up.
+            named.grid = false; named.pulseHz = 0; named.fillAlpha = 0.14f; named.edgeAlpha = 0.95f; named.edgeWidthPx = 3.0;
+            named.fill = "#F59E0B"; named.edge = "#FBBF24";
             var unnamed = _palette.StyleFor(new PartVisual { Base = BaseVisual.FUTURE });
-            unnamed = unnamed.Clone(); unnamed.edgeAlpha = 0.55f; unnamed.fillAlpha = 0.06f;
+            unnamed = unnamed.Clone(); unnamed.edgeAlpha = 0.6f; unnamed.fillAlpha = 0.06f;
+            unnamed.fill = "#B45309"; unnamed.edge = "#D97706";                 // the same family, quieter: measured but not named yet
             foreach (var t in inventory.twins)
             {
                 if (_twins.Count >= MaxShown) break;

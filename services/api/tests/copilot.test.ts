@@ -127,6 +127,22 @@ describe("fast path", () => {
     expect(matchFastPath("scan the table", input({ mode: "overlay" }))?.action).toEqual({ type: "start_scan" });
   });
 
+  it("holds back 'done' and 'undo' while build mode is hiding the run: they would change a build nobody can see", () => {
+    // Fresh session, nothing scanned: build mode hides the hologram while you look around and pick, and the run
+    // underneath is whatever was built last. On a headset this answered "Done. Next: stand the tall can C upright"
+    // and marked a part of that older run built; "undo" then reverted it.
+    const design = { ...plan(), plan_id: "plan_build_01k5" };
+    const hidden = { mode: "build" as const, plan: design, buildShowing: false };
+    for (const said of ["done", "undo"]) {
+      const fast = matchFastPath(said, input(hidden));
+      expect([said, fast?.action ?? null]).toEqual([said, null]);
+      expect(fast?.answer_text).toMatch(/Nothing is being built yet/);
+    }
+    // Once a design is on show, they work exactly as before.
+    expect(matchFastPath("done", input({ mode: "build", plan: design, buildShowing: true }))?.action)
+      .toMatchObject({ type: "mark_state", new_state: "built" });
+  });
+
   it("in build mode, 'done' with nothing pointed at marks the current step's parts and reads the next step", () => {
     const state = t.app.ctx.store.getState(currentId());
     const design = { ...plan(), plan_id: "plan_build_01k5" };           // a run that build mode started

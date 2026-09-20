@@ -241,7 +241,7 @@ namespace CutOnce.Device
                     ? "Camera not allowed: the copilot answers without seeing the desk. Allow it in Settings > Privacy."
                     : answer.permission == QuestPermissions.Scene
                     ? "Spatial data not allowed: build mode can't measure objects. Allow it in Settings > Privacy."
-                    : "Microphone not allowed: use the question buttons, or allow it in Settings > Privacy.", 6f);
+                    : "Microphone not allowed, so Kit cannot hear you. Allow it in Settings > Privacy, then start the app again.", 6f);
             // X on the left controller: a press scans this view (what "what can I build?" does), holding it for a second leaves build mode.
             var x = _scanButton.Update(OVRInput.GetDown(OVRInput.RawButton.X), OVRInput.Get(OVRInput.RawButton.X), OVRInput.GetUp(OVRInput.RawButton.X), Time.deltaTime);
             if (x != ButtonGesture.None) _build.OnScanButton(x);

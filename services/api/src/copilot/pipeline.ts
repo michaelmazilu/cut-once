@@ -104,7 +104,8 @@ export async function answerQuery(deps: Deps, input: QueryInput, log: Log): Prom
   if (!transcript) return unheard(deps, turnId, sttFailed, timings, t0, recordTurn);
 
   // Fast path: a spoken command is decided from the plan and the log, so it skips the model entirely.
-  const fast = matchFastPath(transcript, { plan: g.plan, state: g.state, selectedPartId: input.context.selected_part_id, recentEvents: g.recentEvents, mode: input.context.mode });
+  const fast = matchFastPath(transcript, { plan: g.plan, state: g.state, selectedPartId: input.context.selected_part_id, recentEvents: g.recentEvents,
+    mode: input.context.mode, buildShowing: ctx.hooks.build ? ctx.hooks.build.kitContext().started !== null : undefined });
   if (fast) return respondFast(deps, input, g, fast, transcript, turnId, timings, t0, recordTurn, log);
 
   // Retrieval and annotation are independent of each other and of the model, so they overlap — and with the router.
@@ -242,7 +243,8 @@ async function kitTurn(
   const primary = aiFor(ctx.cfg, "turn");
   if (!primary) return null;
   const context = build.kitContext();
-  const fastInput = { plan: g.plan, state: g.state, selectedPartId: input.context.selected_part_id, recentEvents: g.recentEvents, mode: "build" as const };
+  const fastInput = { plan: g.plan, state: g.state, selectedPartId: input.context.selected_part_id, recentEvents: g.recentEvents,
+    mode: "build" as const, buildShowing: context.started !== null };
   // A design on show named outright ("let's build the robot", even "build me a robot" with a Robot on show) is that
   // design, before a wish phrase can take it for a new ask. Only the name and picking words: a question is a question.
   const byName = (words: string) => (context.started ? null : pickIdea(words, context.ideas));
@@ -370,7 +372,7 @@ function unheard(
   deps: Deps, turnId: string, failed: boolean, timings: Record<string, number>, t0: number,
   recordTurn: (r: CopilotResponse, chunkIds: string[]) => void,
 ): CopilotResponse {
-  const answer_text = failed ? "I couldn't hear that. Hold A and ask again." : "I didn't catch that. Hold A and ask again.";
+  const answer_text = failed ? "I couldn't hear that. Press A and ask again." : "I didn't catch that. Press A and ask again.";
   deps.speech.start(turnId, answer_text);
   const response: CopilotResponse = {
     ...shell(turnId, ""), answer_text, needs_clarification: true, audio_url: `/v1/audio/${turnId}`,

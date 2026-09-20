@@ -161,14 +161,14 @@ describe("a question", () => {
     transcribe.mockRejectedValue(new Error("Request timed out."));
     const r = await query();
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toMatchObject({ needs_clarification: true, answer_text: "I couldn't hear that. Hold A and ask again." });
+    expect(r.json()).toMatchObject({ needs_clarification: true, answer_text: "I couldn't hear that. Press A and ask again." });
     expect(r.json().audio_url).toMatch(/^\/v1\/audio\/turn_/);
     expect(ask).not.toHaveBeenCalled();
   });
 
   it("answers out loud when nothing was said", async () => {
     transcribe.mockResolvedValue("");
-    expect((await query()).json()).toMatchObject({ needs_clarification: true, answer_text: "I didn't catch that. Hold A and ask again." });
+    expect((await query()).json()).toMatchObject({ needs_clarification: true, answer_text: "I didn't catch that. Press A and ask again." });
   });
 
   it("still 503s with a readable reason when the OpenAI key is missing: a set-up problem to find at rehearsal", async () => {
@@ -457,9 +457,9 @@ describe("build mode: Kit's turn", () => {
   it("on OpenAI, a transcription that fails or hears nothing is said out loud, with no Kit call", async () => {
     onTable();
     transcribe.mockRejectedValue(new Error("Request timed out."));
-    expect((await query({ mode: "build" })).json().answer_text).toBe("I couldn't hear that. Hold A and ask again.");
+    expect((await query({ mode: "build" })).json().answer_text).toBe("I couldn't hear that. Press A and ask again.");
     transcribe.mockResolvedValue("");
-    expect((await query({ mode: "build" })).json().answer_text).toBe("I didn't catch that. Hold A and ask again.");
+    expect((await query({ mode: "build" })).json().answer_text).toBe("I didn't catch that. Press A and ask again.");
     expect(runKitTurn).not.toHaveBeenCalled();
   });
 
@@ -587,7 +587,7 @@ describe("build mode: Kit's turn", () => {
   it("says 'I didn't catch that' when nothing was heard", async () => {
     onTable();
     kitHears({ heard: "  ", intent: "unclear", answer: "" });
-    expect((await query({ mode: "build" })).json().answer_text).toBe("I didn't catch that. Hold A and ask again.");
+    expect((await query({ mode: "build" })).json().answer_text).toBe("I didn't catch that. Press A and ask again.");
   });
 
   it("tries OMNI first and, when it fails fast, OpenAI once, inside the hard cap", async () => {

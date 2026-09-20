@@ -5,6 +5,13 @@ export interface FastPathInput {
   plan: Plan; state: BuildState; selectedPartId: string | null; recentEvents: BuildEvent[];
   /** The headset's mode. "build" from the first scan to the end of the walkthrough. */
   mode?: "upload" | "overlay" | "build";
+  /**
+   * In build mode: is the run the server is holding the design that is actually on show? While the builder is
+   * scanning and picking, build mode hides the hologram, and the run underneath is whatever was built last. Without
+   * this, "done" on a fresh session answered "Done. Next: stand the tall can C upright" and marked a part of a run
+   * nobody could see.
+   */
+  buildShowing?: boolean;
 }
 /**
  * `action: null` is a spoken reply with nothing to apply; `note` is written on the event (blueprint §550 for undo).
@@ -53,6 +60,12 @@ export function resolvePart(phrase: string, parts: Part[]): Part | null {
   }
   return best && !tied ? best.part : null;
 }
+
+/** Said when a step command arrives with no build on show: the builder is still choosing, or has not scanned yet. */
+const NOTHING_ON_SHOW: FastPath = {
+  action: null, highlight_parts: [],
+  answer_text: "Nothing is being built yet. Ask me what you can build, then pick a design and I'll walk you through it.",
+};
 
 const PLAIN_ASK = /^(what can (i|we) (build|make)( with (this|these|that|all this|all of this|this stuff))?|what could (i|we) (build|make)( with (this|these|that))?|help me build something|build something|make something)$/;
 const ASKING = "(?:hey kit )?(?:kit )?(?:(?:can|could|would|will) you |please )?";
@@ -109,7 +122,8 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
     return { action: { type: "start_scan" }, answer_text: "Let me see what you've got.", highlight_parts: [] };
   }
 
-  // "next" / "back": pure headset navigation, no event.
+  // "next" / "back": pure headset navigation, no event. Left alone when nothing is on show — it writes nothing and
+  // moving the step the HUD reads is harmless; only the commands that CHANGE the build are held back below.
   if (/^(next|next step|go next|carry on)$/.test(text)) return { action: { type: "step_nav", direction: "next" }, answer_text: "Next step.", highlight_parts: [] };
   if (/^(back|go back|previous|previous step|last step)$/.test(text)) return { action: { type: "step_nav", direction: "back" }, answer_text: "Going back a step.", highlight_parts: [] };
 
@@ -117,6 +131,7 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
   // been undone yet, so saying it twice steps back twice instead of redoing. Seeded demo state is never
   // undone. Expressed as a normal mark_state noted "undo of evt_…" (blueprint §550): the log stays append-only.
   if (/^(undo|undo that|undo it|take that back)$/.test(text)) {
+    if (mode === "build" && input.buildShowing === false) return NOTHING_ON_SHOW;
     const undone = new Set(recentEvents.map((e) => /^undo of (evt_\w+)/.exec(e.note ?? "")?.[1]));
     const last = [...recentEvents].reverse().find((e) => e.kind === "part_state" && e.part_id && e.previous_state && e.new_state
       && (e.source === "voice" || e.source === "manual") && !e.note?.startsWith("undo of ") && !undone.has(e.event_id));
@@ -134,7 +149,11 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
     // Nothing selected: let the model ask which part. Except in a build-mode run, where you are holding the piece, not
     // pointing: there "done" is the whole step. Build mode is also on while scanning and picking, when the run is still
     // the old one, so the plan decides, not the mode alone.
-    if (!selectedPartId) return mode === "build" && isBuildPlan(plan) ? stepDone(plan, state) : null;
+    if (!selectedPartId) {
+      if (mode !== "build" || !isBuildPlan(plan)) return null;
+      if (input.buildShowing === false) return NOTHING_ON_SHOW;
+      return stepDone(plan, state);
+    }
     // The headset can point at a part from a plan revision the server no longer runs: say so, do not fail the turn.
     if (!plan.parts.some((p) => p.part_id === selectedPartId)) {
       return { action: null, answer_text: "That part isn't in this plan. Reload the plan on the headset and try again.", highlight_parts: [] };
