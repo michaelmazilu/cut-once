@@ -61,6 +61,24 @@ instance segmentation, and unseen surfaces are not invented. A segmentation
 model plus captured RGB pose/intrinsics would be needed for semantic separation
 of overlapping/same-depth objects.
 
+An isolated `mode=segmentation-proof` workflow now evaluates an RTMDet-Ins-tiny
+candidate without replacing the bundled detector or producing an APK. It exports
+pinned sources on a disposable Linux worker, then compares every raw model and
+mask-decoder output against Torch references on the Mac's exact Unity version,
+using CPU and GPUCompute. Separately, both existing photographs must pass bottle
+and dining-table bbox IoU >= 0.4 and pixel-mask IoU >= 0.5, at the unchanged 0.4
+scanner confidence and 0.5 NMS. Reports are bound to the same-run manifest hash.
+Numerical compatibility cannot override a failed semantic mask test. See
+[`segmentation/README.md`](segmentation/README.md) for reproduction and provenance.
+
+The first local 320 and 640 candidates both pass Torch-to-ONNX numerical checks
+but only three of four expected object-mask checks: both miss the dining table
+in photo 160012 at the fixed confidence cutoff. Neither is promoted to production.
+`CapturedCameraProjection` and its tests provide calibrated world-to-captured-RGB
+mask coordinates, but are not yet wired into live highlighting and assume a
+correctly paired image/pose. Physical capture pairing remains an explicit risk in
+`ACCEPTANCE.md`.
+
 ## On-headset acceptance
 
 Before headset testing, `pnpm quest:recognition-proof` runs the production model

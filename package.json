@@ -42,6 +42,7 @@
     "quest:recognition-proof": "tsx tools/quest/unity.ts recognition-proof",
     "quest:convert-model": "tsx tools/quest/unity.ts convert-model",
     "quest:device-status": "node tools/quest/device-status.mjs",
+    "quest:segmentation-proof": "tsx tools/quest/unity.ts segmentation-proof",
     "quest:install": "tsx tools/quest/unity.ts install"
   },
   "devDependencies": {

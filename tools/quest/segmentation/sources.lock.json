@@ -1,0 +1,70 @@
+{
+  "source_commit": "cfd5d3a985b0249de009b67d04f37263e11cdf3d",
+  "sources": {
+    "reference/cspnext.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/backbones/cspnext.py",
+      "sha256": "03829212e539c2b548eed809c80cadef9614bbb7b91776d16ca9976a364941e4",
+      "bytes": 7784
+    },
+    "reference/cspnext_pafpn.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/necks/cspnext_pafpn.py",
+      "sha256": "3c3a67b4c1121ff5b5de88efa5dfa2a15ec789a4b7a8e4572d9e87132e3d0ca0",
+      "bytes": 6178
+    },
+    "reference/csp_layer.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/layers/csp_layer.py",
+      "sha256": "9838bca1ee7b0791ee39afe6f86f7c1d8020581517af0b7c0d18f11a1d5ade55",
+      "bytes": 9136
+    },
+    "reference/csp_darknet.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/backbones/csp_darknet.py",
+      "sha256": "ecaae28ad75ed62d1ee02bf2d8fd87034389fe3361cbc026910151954bb5735e",
+      "bytes": 10620
+    },
+    "reference/se_layer.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/layers/se_layer.py",
+      "sha256": "422e9a7ba47bf615693ceda35f972c695a4044555fee0678a1686402620a8101",
+      "bytes": 6523
+    },
+    "reference/rtmdet_ins_head.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/dense_heads/rtmdet_ins_head.py",
+      "sha256": "f2abd20514d4151113aa970708bdaa02b8519b5b4c9e88e343a8225c4794e124",
+      "bytes": 43632
+    },
+    "reference/rtmdet.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/mmdet/models/detectors/rtmdet.py",
+      "sha256": "ee46630b31325b2c98d1d4751e639a4d879d9e389da0b0743e9352c2f65e9fc6",
+      "bytes": 2073
+    },
+    "reference/config_tiny.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/configs/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco.py",
+      "sha256": "5d1b5227b8ee80fa0b93d1982b720592e82f3e659b9d096e039b18bd02077ba4",
+      "bytes": 1546
+    },
+    "reference/config_s.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/configs/rtmdet/rtmdet-ins_s_8xb32-300e_coco.py",
+      "sha256": "79f174b91271568dcd57e803278b4b563536be16f37969a072f5488f437a2178",
+      "bytes": 2492
+    },
+    "reference/config_l.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/configs/rtmdet/rtmdet-ins_l_8xb32-300e_coco.py",
+      "sha256": "cca6e6b7aae1d9b6eb1ee39e9e0a5c29043300a7aee5be07210710352d23b6f3",
+      "bytes": 3140
+    },
+    "reference/config_detector_l.py": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/configs/rtmdet/rtmdet_l_8xb32-300e_coco.py",
+      "sha256": "71ba745a1d08f734d94797a98e5ee2be0bcf30dc98b3b2a89aa1ce211174d274",
+      "bytes": 5272
+    },
+    "reference/LICENSE": {
+      "url": "https://raw.githubusercontent.com/open-mmlab/mmdetection/cfd5d3a985b0249de009b67d04f37263e11cdf3d/LICENSE",
+      "sha256": "874b8b2e6f12306a1ff7812c068a0dbf880418b8ac1f7190382bd6c6da9f23a1",
+      "bytes": 11398
+    },
+    "rtmdet-ins-tiny.pth": {
+      "url": "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet-ins_tiny_8xb32-300e_coco/rtmdet-ins_tiny_8xb32-300e_coco_20221130_151727-ec670f7e.pth",
+      "sha256": "ec670f7ee9e20bd7931e15f15b7016f7fe531baaab81f2e6153382d046111885",
+      "bytes": 22757492
+    }
+  }
+}

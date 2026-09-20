@@ -6,13 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build/test the app, or inspect an attached Quest without changing it
+        description: Build the app, inspect a connected Quest, or verify isolated segmentation candidates
         type: choice
         required: true
         default: build
         options:
           - build
           - device-status
+          - segmentation-proof
       model_precision:
         description: Use bundled model weights, or test the reviewed float32 conversion candidate
         type: choice
@@ -31,7 +32,7 @@ concurrency:
 
 jobs:
   quest:
-    if: ${{ inputs.mode != 'device-status' }}
+    if: ${{ inputs.mode == 'build' }}
     runs-on: [self-hosted, macOS, cutonce-unity]
     timeout-minutes: 120
     env:
@@ -179,3 +180,133 @@ jobs:
           path: ${{ env.QUEST_PROBE_ROOT }}/apps/quest/Logs/cli/device-status/report.json
           if-no-files-found: warn
           retention-days: 3
+
+  segmentation-export:
+    if: ${{ inputs.mode == 'segmentation-proof' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      SEGMENTATION_EXPORT_ROOT: ${{ github.workspace }}/segmentation-export-${{ github.run_id }}-${{ github.run_attempt }}
+    outputs:
+      manifest-sha256: ${{ steps.export.outputs.manifest_sha256 }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/segmentation-export-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out reviewed exporter code only
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir "$SEGMENTATION_EXPORT_ROOT"
+          git init "$SEGMENTATION_EXPORT_ROOT"
+          cd "$SEGMENTATION_EXPORT_ROOT"
+          git remote add origin https://github.com/michaelmazilu/kitbash.git
+          git -c credential.helper= fetch --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout init --no-cone
+          git sparse-checkout set '/tools/quest/segmentation/' '/tools/quest/fixtures/recognition-coco.json'
+          git -c credential.helper= checkout --detach FETCH_HEAD
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated CPU export dependencies on the disposable Linux runner
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r tools/quest/segmentation/requirements.txt
+      - name: Test preprocessing, decoding, source integrity and output isolation
+        run: .venv/bin/python -m unittest discover -s tools/quest/segmentation/tests -v
+      - name: Export pinned candidate and numerical/semantic reference evidence
+        id: export
+        run: |
+          .venv/bin/python tools/quest/segmentation/export.py --size 320 --output apps/quest/Logs/cli/segmentation-candidate
+          manifest_sha256=$(sha256sum apps/quest/Logs/cli/segmentation-candidate/manifest.json | awk '{print $1}')
+          echo "manifest_sha256=$manifest_sha256" >> "$GITHUB_OUTPUT"
+      - name: Upload immutable candidate/reference package for this run
+        if: ${{ steps.export.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quest-segmentation-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.SEGMENTATION_EXPORT_ROOT }}/apps/quest/Logs/cli/segmentation-candidate/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload export reports even if the candidate fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quest-segmentation-export-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.SEGMENTATION_EXPORT_ROOT }}/apps/quest/Logs/cli/segmentation-candidate/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  segmentation-unity:
+    if: ${{ inputs.mode == 'segmentation-proof' }}
+    needs: segmentation-export
+    runs-on: [self-hosted, macOS, cutonce-unity]
+    timeout-minutes: 45
+    env:
+      SEGMENTATION_UNITY_ROOT: ${{ github.workspace }}/segmentation-unity-${{ github.run_id }}-${{ github.run_attempt }}
+      SEGMENTATION_MANIFEST_SHA256: ${{ needs.segmentation-export.outputs.manifest-sha256 }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/segmentation-unity-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out the same reviewed commit into an isolated Unity project
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir "$SEGMENTATION_UNITY_ROOT"
+          git init "$SEGMENTATION_UNITY_ROOT"
+          cd "$SEGMENTATION_UNITY_ROOT"
+          git remote add origin https://github.com/michaelmazilu/kitbash.git
+          git lfs install --local
+          git -c credential.helper= fetch --depth=1 origin "$GITHUB_SHA"
+          git -c credential.helper= checkout --detach FETCH_HEAD
+          git -c credential.helper= lfs pull
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: quest-segmentation-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/segmentation-inputs/
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: segmentation-unity-${{ github.run_id }}-${{ github.run_attempt }}/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ${{ env.SEGMENTATION_UNITY_ROOT }}/pnpm-lock.yaml
+      - name: Require the pinned Unity editor and reference manifest
+        run: |
+          version=$(sed -n 's/^m_EditorVersion: //p' apps/quest/ProjectSettings/ProjectVersion.txt | tr -d '\r')
+          editor="/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+          test -x "$editor" || { echo "Install Unity $version and Android Build Support through Unity Hub."; exit 1; }
+          test -n "$SEGMENTATION_MANIFEST_SHA256" || { echo "The export job did not supply a manifest pin."; exit 1; }
+          echo "UNITY_PATH=$editor" >> "$GITHUB_ENV"
+          echo "Candidate-only segmentation proof of $GITHUB_SHA with Unity $version; no APK promotion." >> "$GITHUB_STEP_SUMMARY"
+      - run: pnpm install --frozen-lockfile
+      - name: Test artifact integrity and fail-closed semantic acceptance
+        run: node --test tools/quest/node-tests/segmentation-evidence.test.mjs
+      - name: Apply existing Quest settings
+        run: caffeinate -i pnpm quest:setup
+      - name: Compile, test captured-camera projection, and check existing Quest readiness
+        run: caffeinate -i pnpm quest:check
+      - name: Compare CPU and GPUCompute model outputs to the pinned reference tensors
+        run: caffeinate -i pnpm quest:segmentation-proof
+      - name: Require the recorded-photo semantic mask acceptance as a separate gate
+        run: node tools/quest/verify-segmentation-evidence.mjs
+      - name: Upload Unity and semantic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quest-segmentation-unity-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/segmentation-proof/
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/segmentation-proof.log
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/setup.log
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/tests.log
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/editmode-results.xml
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/check.log
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/quest-check.json
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/meta-setup-report.json
+            ${{ env.SEGMENTATION_UNITY_ROOT }}/apps/quest/Logs/cli/segmentation-inputs/*.json
+          if-no-files-found: warn
+          retention-days: 14

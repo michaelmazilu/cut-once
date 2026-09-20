@@ -42,6 +42,12 @@ mockups for screenshots of the running build.
 
 ## Remaining localization risks
 
+- The SDK 205 `PassthroughCameraAccess.GetTexture` documentation warns that a
+  blocking `Graphics.Blit` can sample previous-frame pixels because the camera
+  texture updates on the render thread. The current preprocessor uses that call.
+  Caching `GetCameraPose` before inference does not by itself prove pixel/pose
+  pairing. Render-order and physical head-motion correspondence need verification;
+  the pure captured-camera projection helper assumes a correctly paired capture.
 - Captured RGB rays currently query depth when inference completes. An object
   moving away during that interval can expose a valid wall hit; a short freshness
   limit alone cannot synchronize RGB and depth.

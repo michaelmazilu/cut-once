@@ -24,6 +24,8 @@ apps/quest/MemoryCaptures/
 # Pinned source weights are downloaded only for explicit candidate conversion, never shipped.
 apps/quest/Assets/CutOnce/Vision/Editor/ModelSource/yolov9-source.onnx
 apps/quest/Assets/CutOnce/Vision/Editor/ModelSource/yolov9-source.onnx.meta
+apps/quest/Assets/CutOnce/Vision/Editor/SegmentationSource/*.onnx
+apps/quest/Assets/CutOnce/Vision/Editor/SegmentationSource/*.onnx.meta
 # IDE files Unity regenerates on every machine (Rider, Visual Studio, VS Code)
 apps/quest/*.csproj
 apps/quest/*.sln

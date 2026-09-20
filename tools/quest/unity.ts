@@ -9,6 +9,7 @@
  *   pnpm quest:surface-proof render and verify the surface shader against synthetic measured depth
  *   pnpm quest:recognition-proof run the real detector on pinned photos and check names/box overlap
  *   pnpm quest:convert-model export a pinned full-precision candidate for explicit model comparison
+ *   pnpm quest:segmentation-proof compare isolated candidate models against pinned reference tensors
  *   pnpm quest:install   install that APK on a Quest plugged in by USB-C and start it
  *
  * The Editor must be closed: Unity allows one instance per project. With it open, the Cut Once menu runs the
@@ -338,6 +339,34 @@ function convertModel(): number {
   return 0;
 }
 
+/** Import/reference gate only: candidate files are editor-only and never replace the live detector. */
+function segmentationProof(): number {
+  const manifest = join(LOGS, "segmentation-inputs", "manifest.json");
+  const report = join(LOGS, "segmentation-proof", "report.json");
+  fresh(report);
+  if (!existsSync(manifest)) {
+    console.error("Missing segmentation reference package. Run the explicit segmentation-proof workflow to export pinned candidates first.");
+    return 1;
+  }
+  const args = ["-executeMethod", "CutOnce.Vision.Editor.SegmentationProof.Run", "-segmentationManifest", manifest];
+  const manifestSha256 = process.env.SEGMENTATION_MANIFEST_SHA256;
+  if (manifestSha256) {
+    if (!/^[a-f0-9]{64}$/.test(manifestSha256)) {
+      console.error("Invalid segmentation reference manifest checksum.");
+      return 1;
+    }
+    args.push("-segmentationManifestSha256", manifestSha256);
+  }
+  const run = unity("segmentation-proof", args, { graphics: true, minutes: 20 });
+  if (run.code !== 0) return run.code;
+  if (!existsSync(report) || JSON.parse(readFileSync(report, "utf8")).passed !== true) {
+    console.error("Segmentation import/reference comparison did not produce a passing report.");
+    return 1;
+  }
+  console.log(`Segmentation numeric comparison passed: ${report}. This is not live camera, mask alignment or Quest performance proof.`);
+  return 0;
+}
+
 /** The production model/preprocessor on recorded photos; deliberately not claimed as a headset test. */
 function recognitionProof(): number {
   const download = spawnSync(process.execPath, [join(ROOT, "tools/quest/download-recognition-fixtures.mjs")], { stdio: "inherit" });
@@ -379,7 +408,7 @@ function install(): number {
   return 0;
 }
 
-const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof, "recognition-proof": recognitionProof, "convert-model": convertModel };
+const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof, "recognition-proof": recognitionProof, "convert-model": convertModel, "segmentation-proof": segmentationProof };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const name = process.argv[2] ?? "";
   const cmd = commands[name];
