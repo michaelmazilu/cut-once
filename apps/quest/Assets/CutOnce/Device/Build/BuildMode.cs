@@ -88,7 +88,6 @@ namespace CutOnce.Device
             if (wasOff) _overServerRun = _sync.HasServerRun;
             _previews.Clear(); _hovered = null;
             ShowOrHideHologram();
-            ScannerRunning(false);                                           // the room scanner's labels stand down: this scan names the objects
             _hud.Toast("Scanning… hold still for a second", 3f);
             var copilot = FindAnyObjectByType<CopilotController>();
             var frames = copilot != null ? copilot.frameSourceBehaviour as ICameraFrameSource : null;
@@ -109,7 +108,6 @@ namespace CutOnce.Device
             _flow.ScanFailed(ticket);
             if (_flow.Phase == BuildPhase.Ideas) ShowPreviews();             // a look-around scan that failed: the ideas are still good
             ShowOrHideHologram();
-            if (!_flow.Active) ScannerRunning(true);                          // the first scan failed, so build mode is off again: the room is the scanner's
         }
 
         async Task Upload(BuildScanUploadDto scan, int ticket)
@@ -349,20 +347,7 @@ namespace CutOnce.Device
             _twins.Clear(); _previews.Clear();
             _hovered = null; _lastStepId = null;
             ShowOrHideHologram();
-            ScannerRunning(true);
         }
-
-        /// <summary>
-        /// The room scanner (YOLO on the passthrough camera) runs while the room is yours to look at, and stops while
-        /// build mode has it. Both read one camera, so this is about names and frame time, not about who owns it.
-        /// </summary>
-        static void ScannerRunning(bool running)
-        {
-            var scanner = CutOnce.Vision.RoomScannerBootstrap.Instance;
-            if (scanner != null) scanner.Paused = !running;
-        }
-
-        void OnDisable() => ScannerRunning(true);                            // build mode going away must never leave the room quiet
 
         Vector3 Head() => Camera.main != null ? Camera.main.transform.position : new Vector3(0f, 1.6f, 0f);
 

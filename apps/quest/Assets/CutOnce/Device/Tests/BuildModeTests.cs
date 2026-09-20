@@ -143,6 +143,8 @@ namespace CutOnce.Device.PlayTests
 
             Call(mode, "StartScan");
             Assert.That(Phase(mode), Is.EqualTo(BuildPhase.Scanning), "the scan did not start");
+            Assert.That(CutOnce.Vision.RoomScannerBootstrap.Instance?.Paused, Is.False,
+                "entering build mode stopped continuous object tracking and hid its highlights");
             Assert.That(Hologram().gameObject.activeSelf, Is.False, "the run that was showing is out of the way while the room is scanned");
             yield return Until(() => Phase(mode) == BuildPhase.Off, 15f, "a scan with no depth did not end with build mode off");
 
