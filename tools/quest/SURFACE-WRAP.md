@@ -138,6 +138,15 @@ the player. A normal build uses these committed bytes and does not convert them.
 Neither the two-photo success nor Mac CPU latency establishes accuracy on every
 COCO class, live Quest camera access, real-world alignment or sustained 72fps.
 
+The subsequent normal/bundled-model run `35499902362` at `a188e82` also passed:
+271 Unity tests (including the new acquisition-age/pause/cadence regressions),
+both photos across all repeats with identical predictions, blank/preprocessing
+checks, all 16 surface checks, readiness with zero errors and one existing
+simulator-update warning, and the Android APK build. No model conversion was
+performed in that run. The latest read-only Mac USB check (`35499599170`) found
+zero connected devices, so no live recognition or frame-time acceptance follows
+from these passing offline checks. See `ACCEPTANCE.md` for the complete checklist.
+
 The same manual workflow supports `mode=device-status`, or run
 `pnpm quest:device-status` on the Mac. This only inspects an authorized USB Quest
 using Unity's bundled ADB; it does not install/launch the app, grant permissions,

@@ -5,9 +5,18 @@ a rendered table fixture. Recorded-photo and synthetic-depth checks are useful
 regressions, but cannot establish live camera behavior, stereo registration,
 identity stability or sustained Quest performance.
 
+Latest committed-model build: `a188e82`,
+[Mac run 35499902362](https://github.com/michaelmazilu/kitbash/actions/runs/35499902362).
+All 271 Unity tests, both recorded recognition photos (three repeats each),
+blank negative control, preprocessing checks and 16 synthetic surface checks
+passed. Android APK built successfully. Readiness reported no errors and one
+existing simulator-update warning. Verification ladder: steps 1–3 plus explicit
+recorded-image/GPU fixtures; not a live simulator session or step 5 headset proof.
+The last Mac USB probe (`35499599170`) found no connected devices.
+
 | Requirement | Existing implementation / evidence | Remaining acceptance |
 | --- | --- | --- |
-| Identifies the object | Actual YOLO inference, 80 COCO class names, pinned bottle/table photo tests | Pass unchanged photo checks with the shipping weights; test representative objects through the Quest camera. No claim to recognize every possible category. |
+| Identifies the object | Actual YOLO inference, 80 COCO class names; shipping FP32 weights pass the unchanged bottle/table photo tests | Test representative objects through the Quest camera. No claim to recognize every possible category. |
 | Knows its room position | Calibrated captured-camera rays and measured environment depth; no guessed fallback | Measure placement on real bottle/table surfaces, at image edges and off-axis. |
 | Highlights the object blue | Production stereo surface shader, synthetic-depth GPU checks | Verify real passthrough alignment and both eyes. |
 | Shows its name beside it | Recognizer class name on a tracked world-space label | Check readability and label overlap while moving. |
