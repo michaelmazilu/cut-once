@@ -24,6 +24,22 @@ does not claim RGB/depth synchronization. Recorded-photo inference deliberately
 does not claim live freshness. Scan rate reports actual publication intervals,
 including the rate limit and camera waits, separately from processing latency.
 
+Live input is now an owned, single-flight RGBA snapshot. MRUK 205 documents that
+immediate `Graphics.Blit` of its camera texture can pick previous-frame pixels;
+the snapshot requests asynchronous readback directly from the original texture,
+preserves its sRGB/UNorm bytes on upload, and holds pose/calibration/UTC capture ID
+from enqueue time. Pauses, disable/restart, invalid metadata and stale acquisition
+invalidate delivery; an outstanding request must drain before its slot is reused.
+Readback time consumes the existing 0.5-second live freshness window. The snapshot
+is not overwritten until inference releases it. There is no live-texture fallback.
+
+The recognition proof includes two numerical snapshot fixtures (sRGB and UNorm):
+known quadrant colours must survive source overwrite while leased, then a second
+acquisition must contain the newly written pixels. These GPU tests use an explicit
+long numerical-test timeout, not the production freshness limit. Lifecycle tests
+check the real half-second boundary separately. Neither fixture is a physical PCA
+capture: native RGB/pose pairing and readback/upload cost still need Quest tests.
+
 RoomSense's room-wide glow and guessed gaze labels are suppressed while Vision
 owns recognition. Its MRUK room geometry, anchors and colliders remain active.
 This policy applies to both existing and later-created RoomSense components.

@@ -44,10 +44,13 @@ mockups for screenshots of the running build.
 
 - The SDK 205 `PassthroughCameraAccess.GetTexture` documentation warns that a
   blocking `Graphics.Blit` can sample previous-frame pixels because the camera
-  texture updates on the render thread. The current preprocessor uses that call.
-  Caching `GetCameraPose` before inference does not by itself prove pixel/pose
-  pairing. Render-order and physical head-motion correspondence need verification;
-  the pure captured-camera projection helper assumes a correctly paired capture.
+  texture updates on the render thread. Live acquisition now uses its documented
+  direct asynchronous readback route, then holds an owned RGBA snapshot with the
+  enqueue-time pose/calibration/timestamp. Letterboxing samples that held copy,
+  not the live camera texture. Same-frame metadata checks and restart generations
+  protect this handoff, but cannot prove native sensor/render timestamp pairing.
+  Physical head-motion correspondence and the extra transfer cost need measurement;
+  the captured-camera projection helper assumes a correctly paired capture.
 - Captured RGB rays currently query depth when inference completes. An object
   moving away during that interval can expose a valid wall hit; a short freshness
   limit alone cannot synchronize RGB and depth.

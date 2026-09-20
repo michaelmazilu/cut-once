@@ -16,8 +16,9 @@ namespace CutOnce.Vision
     /// Deliberate departures from the sample:
     ///  - its RunInference() opens with a local DllImport of ovrp_GetNodePoseStateAtTime, an
     ///    undocumented P/Invoke into OVRPlugin, purely to decide whether the camera pose is
-    ///    trustworthy. We skip frames using the camera's own IsUpdatedThisFrame instead, which is
-    ///    public API and tells us the same thing for our purposes.
+    ///    trustworthy. We use the public camera metadata and documented asynchronous snapshot
+    ///    route. This avoids immediate-Blit previous-frame pixels, but hardware pairing still
+    ///    needs a real moving-head test; IsUpdatedThisFrame alone does not prove pose accuracy.
     ///  - the sample drives a world-space uGUI canvas; we raise an event and let the rest of the
     ///    pipeline decide what to do with it.
     ///  - the sample suppresses boxes across classes. We suppress duplicates within a class so a
@@ -66,12 +67,14 @@ namespace CutOnce.Vision
                 _paused = value;
                 unchecked { _publicationGeneration++; }
                 _publicationCadence.Reset();
+                _camera?.InvalidateSnapshots();
             }
         }
 
         private bool _loggedRawBox;
         private bool _paused;
         private int _publicationGeneration;
+        private bool _applicationPaused;
 
         /// <summary>Detections, plus the camera pose and input size they were computed against.</summary>
         public event Action<List<DetectedObject>, Pose, Vector2> OnDetections;
@@ -184,7 +187,7 @@ namespace CutOnce.Vision
                 var minInterval = maxInferencesPerSecond > 0f ? 1f / maxInferencesPerSecond : 0f;
                 // Paused, not stopped. Unity does not stop a coroutine when its component is disabled, and Start()
                 // runs once per component, so leaving the loop here would end detection for the rest of the session.
-                if (Paused || _camera == null || !_camera.IsReady || !_camera.HasFreshFrame ||
+                if (Paused || _applicationPaused || !isActiveAndEnabled || _camera == null || !_camera.IsReady || !_camera.HasFreshFrame ||
                     Time.time - _lastInferenceStartedAt < minInterval)
                 {
                     yield return null;
@@ -196,16 +199,39 @@ namespace CutOnce.Vision
 
         private IEnumerator RunInference()
         {
-            // This marks application acquisition, not sensor exposure. MRUK's public Timestamp is
-            // UTC, a different clock domain; inventing a conversion would claim accuracy we lack.
-            var acquiredAt = Time.realtimeSinceStartupAsDouble;
-            var texture = _camera.GetTexture();
-            if (texture == null) { yield return null; yield break; }
+            var camera = _camera;
+            var startedGeneration = _publicationGeneration; // Latch BEFORE readback, not after a pause/resume.
+            if (!camera.TryBeginSnapshot())
+            {
+                ReportCaptureError(camera.LastCaptureError);
+                yield return null;
+                yield break;
+            }
+            while (camera != null)
+            {
+                var status = camera.PollSnapshot(Time.realtimeSinceStartupAsDouble);
+                ReportCaptureError(camera.LastCaptureError);
+                if (status != CameraSnapshotStatus.Pending && status != CameraSnapshotStatus.Draining) break;
+                yield return null; // Expired/invalidated requests drain; never reuse their slot early.
+            }
+            if (camera == null) yield break;
+            if (Paused || _applicationPaused || !isActiveAndEnabled || startedGeneration != _publicationGeneration)
+            {
+                camera.InvalidateSnapshots();
+                yield break;
+            }
+            if (!camera.TryTakeSnapshot(out var snapshot)) yield break;
+            try
+            {
+                yield return DetectFrame(snapshot.Texture, snapshot.Stamp.Pose,
+                    new DetectionFrameTiming(snapshot.Stamp.AcquiredAtRealtimeSeconds), startedGeneration, snapshot.Stamp.Generation);
+            }
+            finally { camera.ReleaseSnapshot(); }
+        }
 
-            // Cache the pose BEFORE inference: it describes the image we are about to run on, and by
-            // the time results land the head has moved. Everything downstream must use this pose.
-            var cameraPose = _camera.GetCameraPose();
-            yield return DetectLiveFrame(texture, cameraPose, acquiredAt);
+        private void ReportCaptureError(string reason)
+        {
+            if (!string.IsNullOrEmpty(reason) && LastError != reason) Fail(reason);
         }
 
         /// <summary>
@@ -219,9 +245,10 @@ namespace CutOnce.Vision
         public IEnumerator DetectLiveFrame(Texture texture, Pose cameraPose, double acquiredAtRealtimeSeconds)
             => DetectFrame(texture, cameraPose, new DetectionFrameTiming(acquiredAtRealtimeSeconds), _publicationGeneration);
 
-        private IEnumerator DetectFrame(Texture texture, Pose cameraPose, DetectionFrameTiming frameTiming, int startedGeneration)
+        private IEnumerator DetectFrame(Texture texture, Pose cameraPose, DetectionFrameTiming frameTiming, int startedGeneration,
+            int? capturedStreamGeneration = null)
         {
-            if (!ModelLoaded || texture == null || InferenceRunning || Paused) yield break;
+            if (!ModelLoaded || texture == null || InferenceRunning || Paused || _applicationPaused) yield break;
 
             _lastInferenceStartedAt = Time.time;
             var startedAt = Time.realtimeSinceStartup;
@@ -280,7 +307,10 @@ namespace CutOnce.Vision
 
             var publishedAt = Time.realtimeSinceStartupAsDouble;
             LastPublicationRejection = DetectionPublicationGate.Evaluate(frameTiming, publishedAt,
-                maxLiveResultAgeSeconds, startedGeneration, _publicationGeneration, Paused);
+                maxLiveResultAgeSeconds, startedGeneration, _publicationGeneration, Paused || _applicationPaused);
+            if (capturedStreamGeneration.HasValue && (_camera == null || !_camera.IsReady ||
+                _camera.CaptureGeneration != capturedStreamGeneration.Value))
+                LastPublicationRejection = DetectionPublicationRejection.PausedOrSuperseded;
             if (LastPublicationRejection != DetectionPublicationRejection.None)
             {
                 DiscardedResults++;
@@ -549,12 +579,28 @@ namespace CutOnce.Vision
             return union <= 0f ? 0f : overlap / union;
         }
 
+        private void OnDisable()
+        {
+            unchecked { ++_publicationGeneration; }
+            _publicationCadence.Reset();
+            _camera?.InvalidateSnapshots();
+        }
+
+        private void OnApplicationPause(bool paused)
+        {
+            _applicationPaused = paused;
+            unchecked { ++_publicationGeneration; }
+            _publicationCadence.Reset();
+            _camera?.InvalidateSnapshots();
+        }
+
         private void OnDestroy()
         {
             StopAllCoroutines();                                             // a readback still in flight must not land on a disposed worker
             _worker?.Dispose();
             _input?.Dispose();
             _letterbox.Dispose();
+            _camera?.ReleaseSnapshot(); // Also covers a coroutine stopped before its finally block runs.
         }
     }
 }

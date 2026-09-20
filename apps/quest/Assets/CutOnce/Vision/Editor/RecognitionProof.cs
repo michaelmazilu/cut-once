@@ -54,11 +54,13 @@ namespace CutOnce.Vision.Editor
             public int repeats = Repeats;
             public bool passed;
             public string error;
+            public string snapshotCleanup;
             public string warmupPolicy = "One explicit blank production inference before measured photos. A cold-start frame discarded by the unchanged 8-second production timeout is reported, not hidden; all subsequent photo inferences must deliver valid output.";
             public InferenceResult coldStartWarmup;
             public bool recoveredAfterWarmup;
             public PreprocessingResult preprocessing;
             public List<LetterboxResult> letterbox = new List<LetterboxResult>();
+            public List<CameraSnapshotResult> cameraSnapshots = new List<CameraSnapshotResult>();
             public List<PhotoResult> photos = new List<PhotoResult>();
             public InferenceResult blankNegativeControl;
             public bool blankNegativeControlPassed;
@@ -133,6 +135,17 @@ namespace CutOnce.Vision.Editor
         }
 
         [Serializable]
+        private sealed class CameraSnapshotResult
+        {
+            public string scope = "Actual AsyncCameraSnapshot readback/upload of known RenderTexture pixels, then production letterbox and tensor conversion. The borrowed source is overwritten after acquisition; held snapshot pixels and metadata must not change. Synthetic buffers/stamps, NOT PCA native sensor timing, live camera permission, Quest alignment, or frame-rate evidence. The 60-second fixture timeout checks numeric correctness, not the production 0.5-second freshness budget.";
+            public string sourceFormat, snapshotFormat;
+            public bool passed, pendingIsExclusive, leaseIsExclusive, metadataPreserved, releaseAllowsReuse;
+            public double readbackMilliseconds;
+            public List<PixelProbe> pixels = new List<PixelProbe>();
+            public List<PixelProbe> reusePixels = new List<PixelProbe>();
+        }
+
+        [Serializable]
         private sealed class BoxMappingProbe
         {
             public string name;
@@ -182,11 +195,13 @@ namespace CutOnce.Vision.Editor
 
         private static readonly Stack<IEnumerator> Routine = new Stack<IEnumerator>();
         private static readonly List<Object> Owned = new List<Object>();
+        private static readonly List<IDisposable> SnapshotResources = new List<IDisposable>();
         private static Report _report;
         private static string _directory;
         private static YoloDetector _detector;
         private static double _inferenceDeadline;
         private static bool _finished;
+        private static bool _pendingSnapshotGpuWork;
         private static GroundTruth _groundTruth;
 
         public static void Run()
@@ -195,6 +210,7 @@ namespace CutOnce.Vision.Editor
             Directory.CreateDirectory(_directory);
             _report = new Report { unity = Application.unityVersion, graphics = SystemInfo.graphicsDeviceName };
             _finished = false;
+            _pendingSnapshotGpuWork = false;
             try
             {
                 if (!Application.isBatchMode)
@@ -249,6 +265,8 @@ namespace CutOnce.Vision.Editor
             yield return CheckLetterbox(false);
             yield return CheckLetterbox(true);
             yield return CheckLetterbox(false, true);
+            yield return CheckCameraSnapshot(true);
+            yield return CheckCameraSnapshot(false);
             var blank = new Texture2D(640, 640, TextureFormat.RGBA32, false);
             Owned.Add(blank);
             var gray = new Color32[640 * 640];
@@ -323,6 +341,7 @@ namespace CutOnce.Vision.Editor
                 _report.blankNegativeControl.eventDelivered && !_detector.InferenceRunning;
             var warmupAcceptable = _report.coldStartWarmup.passed || _report.coldStartWarmup.timeoutDiscarded;
             _report.passed = _report.preprocessing.passed && _report.letterbox.Count == 3 && _report.letterbox.TrueForAll(result => result.passed) &&
+                _report.cameraSnapshots.Count == 2 && _report.cameraSnapshots.TrueForAll(result => result.passed) &&
                 warmupAcceptable && _report.recoveredAfterWarmup &&
                 _report.photos.TrueForAll(photo => photo.passed) && _report.blankNegativeControlPassed;
             if (!_report.passed) _report.error = "At least one actual model-output assertion failed; inspect photo inferences and the negative control.";
@@ -466,6 +485,160 @@ namespace CutOnce.Vision.Editor
             Debug.Log($"[Recognition proof] Actual production letterbox {result.name}: {(result.passed ? "PASS" : "FAIL")}");
         }
 
+        private static IEnumerator CheckCameraSnapshot(bool srgb)
+        {
+            const int width = 160, height = 80, generation = 7;
+            var pattern = new Texture2D(width, height, TextureFormat.RGBA32, false, !srgb);
+            Owned.Add(pattern);
+            var colors = new Color32[width * height];
+            for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                    colors[y * width + x] = y >= height / 2
+                        ? x < width / 2 ? new Color32(255, 0, 0, 255) : new Color32(0, 255, 0, 255)
+                        : x < width / 2 ? new Color32(0, 0, 255, 255) : new Color32(128, 128, 128, 255);
+            pattern.SetPixels32(colors);
+            pattern.Apply(false, false);
+            var source = new RenderTexture(width, height, 0, pattern.graphicsFormat);
+            Owned.Add(source);
+            if (!source.Create()) throw new InvalidOperationException("Could not allocate camera-snapshot fixture.");
+            var oldWrite = GL.sRGBWrite;
+            var oldTarget = RenderTexture.active;
+            try
+            {
+                GL.sRGBWrite = srgb && QualitySettings.activeColorSpace == ColorSpace.Linear;
+                Graphics.Blit(pattern, source);
+            }
+            finally { GL.sRGBWrite = oldWrite; RenderTexture.active = oldTarget; }
+
+            var result = new CameraSnapshotResult { sourceFormat = source.graphicsFormat.ToString() };
+            _report.cameraSnapshots.Add(result);
+            var pose = new Pose(new Vector3(2f, 1f, -3f), Quaternion.Euler(10f, 25f, -4f));
+            var timestamp = new DateTime(2026, 9, 20, 0, 0, 0, DateTimeKind.Utc);
+            var started = EditorApplication.timeSinceStartup;
+            var stamp = new CameraCaptureStamp(pose, timestamp, new Vector2Int(width, height), generation, started);
+            var acquisition = new AsyncCameraSnapshot();
+            var letterbox = new YoloLetterbox();
+            var input = new Tensor<float>(new TensorShape(1, 3, 640, 640));
+            SnapshotResources.Add(acquisition);
+            SnapshotResources.Add(letterbox);
+            SnapshotResources.Add(input);
+            try
+            {
+                if (!acquisition.TryBegin(source, stamp))
+                    throw new InvalidOperationException("Snapshot fixture could not begin: " + acquisition.LastError);
+                result.pendingIsExclusive = !acquisition.TryBegin(source, stamp);
+                while (acquisition.Poll(EditorApplication.timeSinceStartup, generation, InferenceDeadlineSeconds) != CameraSnapshotStatus.Ready)
+                {
+                    if (EditorApplication.timeSinceStartup - started > InferenceDeadlineSeconds ||
+                        acquisition.Status == CameraSnapshotStatus.Idle || acquisition.Status == CameraSnapshotStatus.Disposed)
+                    {
+                        _pendingSnapshotGpuWork = acquisition.Status == CameraSnapshotStatus.Pending || acquisition.Status == CameraSnapshotStatus.Draining;
+                        throw new InvalidOperationException("Snapshot fixture did not complete: " + acquisition.LastError);
+                    }
+                    yield return null;
+                }
+                result.readbackMilliseconds = (EditorApplication.timeSinceStartup - started) * 1000;
+                if (!acquisition.TryTake(out var snapshot)) throw new InvalidOperationException("Ready snapshot could not be leased.");
+                result.leaseIsExclusive = !acquisition.TryBegin(source, stamp);
+                result.snapshotFormat = snapshot.Texture.graphicsFormat.ToString();
+                result.metadataPreserved = snapshot.Stamp.Pose.position == pose.position &&
+                    snapshot.Stamp.Pose.rotation == pose.rotation && snapshot.Stamp.CameraTimestamp == timestamp &&
+                    snapshot.Stamp.Resolution == new Vector2Int(width, height) && snapshot.Stamp.Generation == generation &&
+                    snapshot.Stamp.AcquiredAtRealtimeSeconds == started;
+
+                // Change the actual borrowed GPU source after acquisition. If the helper returned
+                // the live source instead of an owned snapshot, every probe would now be yellow.
+                oldTarget = RenderTexture.active;
+                oldWrite = GL.sRGBWrite;
+                try
+                {
+                    GL.sRGBWrite = srgb && QualitySettings.activeColorSpace == ColorSpace.Linear;
+                    RenderTexture.active = source;
+                    GL.Clear(false, true, Color.yellow);
+                }
+                finally { GL.sRGBWrite = oldWrite; RenderTexture.active = oldTarget; }
+                var gray = 128f / 255f;
+                var pad = 114f / 255f;
+                result.pixels.Add(new PixelProbe { name = "held top-left red", modelX = 160, modelY = 240, expectedRgb = new[] { 1f, 0f, 0f } });
+                result.pixels.Add(new PixelProbe { name = "held top-right green", modelX = 480, modelY = 240, expectedRgb = new[] { 0f, 1f, 0f } });
+                result.pixels.Add(new PixelProbe { name = "held bottom-left blue", modelX = 160, modelY = 400, expectedRgb = new[] { 0f, 0f, 1f } });
+                result.pixels.Add(new PixelProbe { name = "held encoded midgray", modelX = 480, modelY = 400, expectedRgb = new[] { gray, gray, gray } });
+                result.pixels.Add(new PixelProbe { name = "snapshot letterbox padding", modelX = 320, modelY = 80, expectedRgb = new[] { pad, pad, pad } });
+                yield return CheckSnapshotPixels(snapshot.Texture, letterbox, input, result.pixels);
+                acquisition.Release();
+                var secondStarted = EditorApplication.timeSinceStartup;
+                var secondStamp = new CameraCaptureStamp(pose, timestamp.AddMilliseconds(33), new Vector2Int(width, height), generation, secondStarted);
+                result.releaseAllowsReuse = acquisition.TryBegin(source, secondStamp);
+                if (!result.releaseAllowsReuse) throw new InvalidOperationException("Released snapshot could not be reused.");
+                while (acquisition.Poll(EditorApplication.timeSinceStartup, generation, InferenceDeadlineSeconds) != CameraSnapshotStatus.Ready)
+                {
+                    if (EditorApplication.timeSinceStartup - secondStarted > InferenceDeadlineSeconds ||
+                        acquisition.Status == CameraSnapshotStatus.Idle || acquisition.Status == CameraSnapshotStatus.Disposed)
+                    {
+                        _pendingSnapshotGpuWork = acquisition.Status == CameraSnapshotStatus.Pending || acquisition.Status == CameraSnapshotStatus.Draining;
+                        throw new InvalidOperationException("Reused snapshot fixture did not complete: " + acquisition.LastError);
+                    }
+                    yield return null;
+                }
+                result.releaseAllowsReuse &= acquisition.TryTake(out var second) && second.Stamp.CameraTimestamp == secondStamp.CameraTimestamp;
+                if (!result.releaseAllowsReuse) throw new InvalidOperationException("Reused snapshot metadata was not refreshed.");
+                foreach (var probe in result.pixels)
+                    result.reusePixels.Add(new PixelProbe { name = "recaptured " + probe.name, modelX = probe.modelX, modelY = probe.modelY,
+                        expectedRgb = probe.modelY == 80 ? new[] { pad, pad, pad } : new[] { 1f, 1f, 0f } });
+                yield return CheckSnapshotPixels(second.Texture, letterbox, input, result.reusePixels);
+                acquisition.Release();
+            }
+            finally
+            {
+                // No borrowed source, leased destination, or in-flight tensor is destroyed on a
+                // GPU timeout. This isolated batch exits with a failed report and releases them
+                // with the process, rather than blocking or disposing unfinished work.
+                if (!_pendingSnapshotGpuWork)
+                {
+                    acquisition.Release();
+                    acquisition.Dispose();
+                    input.Dispose();
+                    letterbox.Dispose();
+                    SnapshotResources.Clear();
+                }
+            }
+            result.passed = result.pendingIsExclusive && result.leaseIsExclusive && result.metadataPreserved &&
+                result.releaseAllowsReuse && result.sourceFormat == result.snapshotFormat && result.pixels.TrueForAll(probe => probe.passed) &&
+                result.reusePixels.Count == 5 && result.reusePixels.TrueForAll(probe => probe.passed);
+            Debug.Log($"[Recognition proof] Async snapshot {result.sourceFormat}: {(result.passed ? "PASS" : "FAIL")}; synthetic GPU buffer only.");
+        }
+
+        private static IEnumerator CheckSnapshotPixels(Texture texture, YoloLetterbox letterbox, Tensor<float> input, List<PixelProbe> probes)
+        {
+            var prepared = letterbox.Prepare(texture, new Vector2Int(640, 640));
+            TextureConverter.ToTensor(prepared, input, new TextureTransform().SetDimensions(640, 640, 3));
+            input.ReadbackRequest();
+            var deadline = EditorApplication.timeSinceStartup + InferenceDeadlineSeconds;
+            while (!input.IsReadbackRequestDone())
+            {
+                if (EditorApplication.timeSinceStartup > deadline)
+                {
+                    _pendingSnapshotGpuWork = true;
+                    throw new TimeoutException("Snapshot tensor comparison timed out; pending resources retained until isolated Editor exit.");
+                }
+                yield return null;
+            }
+            using (var pixels = input.ReadbackAndClone())
+            {
+                foreach (var probe in probes)
+                {
+                    probe.actualRgb = new float[3];
+                    probe.passed = true;
+                    for (var channel = 0; channel < 3; channel++)
+                    {
+                        var value = pixels[channel * 640 * 640 + probe.modelY * 640 + probe.modelX];
+                        probe.actualRgb[channel] = value;
+                        if (!Finite(value) || Mathf.Abs(value - probe.expectedRgb[channel]) > probe.tolerance) probe.passed = false;
+                    }
+                }
+            }
+        }
+
         private static BoxMappingProbe CheckBoxMapping(string name, YoloLetterboxLayout layout, Rect model, Rect expected)
         {
             var actual = layout.ToSourceRect(model);
@@ -592,9 +765,17 @@ namespace CutOnce.Vision.Editor
                 _report.error = error.ToString();
                 Debug.LogException(error);
             }
-            while (Routine.Count > 0) (Routine.Pop() as IDisposable)?.Dispose();
-            foreach (var resource in Owned) if (resource != null) Object.DestroyImmediate(resource);
-            Owned.Clear();
+            if (_pendingSnapshotGpuWork)
+            {
+                _report.snapshotCleanup = "Snapshot GPU work exceeded its deadline. Borrowed source, leased texture and pending tensor resources are retained until isolated batch-process exit; no async clone was abandoned or source destroyed early.";
+            }
+            else
+            {
+                _report.snapshotCleanup = "Completed snapshot requests, leases and tensor clones were released normally.";
+                while (Routine.Count > 0) (Routine.Pop() as IDisposable)?.Dispose();
+                foreach (var resource in Owned) if (resource != null) Object.DestroyImmediate(resource);
+                Owned.Clear();
+            }
             File.WriteAllText(Path.Combine(_directory, "report.json"), JsonUtility.ToJson(_report, true));
             Debug.Log($"Recorded RGB recognition proof: {(_report.passed ? "PASS" : "FAIL")}. Output: {_directory}. NOT live-headset evidence.");
             if (Application.isBatchMode) EditorApplication.Exit(_report.passed ? 0 : 1);
