@@ -97,15 +97,15 @@ Shader "CutOnce/SurfaceGlow"
                 return all(abs(finalUv - uv) <= max(_EnvironmentDepthTexture_TexelSize.xy, 0.0001) * 1.5);
             }
 
-            float SurfaceGrid(float3 point, float3 normal)
+            float SurfaceGrid(float3 surfacePosition, float3 normal)
             {
-                float3 coord = point / max(_GridSpacing, 0.01);
+                float3 coord = surfacePosition / max(_GridSpacing, 0.01);
                 float3 width = max(fwidth(coord), 0.0001);
-                float3 line = 1 - smoothstep(width * 0.5, width * 1.5, abs(frac(coord + 0.5) - 0.5));
+                float3 gridLine = 1 - smoothstep(width * 0.5, width * 1.5, abs(frac(coord + 0.5) - 0.5));
                 // Triplanar projection keeps a horizontal tabletop from becoming a solid stripe.
                 float3 weights = pow(abs(normal), 8);
                 weights /= max(weights.x + weights.y + weights.z, 0.0001);
-                return dot(float3(max(line.y, line.z), max(line.x, line.z), max(line.x, line.y)), weights);
+                return dot(float3(max(gridLine.y, gridLine.z), max(gridLine.x, gridLine.z), max(gridLine.x, gridLine.y)), weights);
             }
 
             SurfaceOutput frag(Varyings i)
@@ -118,15 +118,15 @@ Shader "CutOnce/SurfaceGlow"
             #if defined(HARD_OCCLUSION) || defined(SOFT_OCCLUSION)
                 float3 eye = _WorldSpaceCameraPos;
                 float3 ray = normalize(i.worldPos - eye);
-                float3 point;
+                float3 surfacePosition;
                 float2 depthUv;
-                bool valid = ReadSurface(eye, ray, i.worldPos, point, depthUv);
+                bool valid = ReadSurface(eye, ray, i.worldPos, surfacePosition, depthUv);
                 // Derivatives before discard keep valid neighbours in each raster quad.
-                float3 tangentX = ddx(point), tangentY = ddy(point);
+                float3 tangentX = ddx(surfacePosition), tangentY = ddy(surfacePosition);
                 float3 normal = normalize(cross(tangentX, tangentY) + 1e-12);
-                float grid = SurfaceGrid(point, normal);
+                float grid = SurfaceGrid(surfacePosition, normal);
                 if (!valid) discard;
-                float3 local = TransformWorldToObject(point);
+                float3 local = TransformWorldToObject(surfacePosition);
                 if (any(abs(local) >= 0.5)) discard;
 
                 float centre = SampleEnvironmentDepthLinear(depthUv);
@@ -141,7 +141,7 @@ Shader "CutOnce/SurfaceGlow"
                 o.colour = half4(lerp(_Tint.rgb, half3(0.6, 0.92, 1), edge * 0.5), strength);
 
                 // Test virtual occluders at the measured surface, not the proxy's back face.
-                float4 clipPosition = TransformWorldToHClip(point - ray * 0.002);
+                float4 clipPosition = TransformWorldToHClip(surfacePosition - ray * 0.002);
                 o.depth = clipPosition.z / clipPosition.w;
             #if !UNITY_REVERSED_Z
                 o.depth = (o.depth - UNITY_NEAR_CLIP_VALUE) / (1 - UNITY_NEAR_CLIP_VALUE);
