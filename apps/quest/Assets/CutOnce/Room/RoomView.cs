@@ -7,7 +7,7 @@ namespace CutOnce.Room
     /// <summary>Bounded renderers, shared stereo-safe material, physical line widths and a world-space HUD.</summary>
     public sealed class RoomView : MonoBehaviour
     {
-        public static readonly Color Cyan = new Color(.15f, .85f, 1, .95f), Amber = new Color(1, .65f, .18f, 1);
+        public static readonly Color Cyan = new Color(.60f, .82f, .74f, .85f), Amber = new Color(.95f, .76f, .43f, .85f);
         Material _material;
         readonly List<GameObject> _map = new List<GameObject>();
         readonly List<LineRenderer> _drawings = new List<LineRenderer>();
@@ -23,16 +23,16 @@ namespace CutOnce.Room
             _material = HologramMaterial.Create();
             _material.SetFloat("_EdgeMode", 3);
             _material.SetColor("_FillColor", Color.clear);
-            _pointer = Line("Pointer", transform, Amber, .002f);
+            _pointer = Line("Pointer", transform, Amber, .001f);
             _pointer.useWorldSpace = true;
-            _preview = Line("Draft", transform, Amber, .004f);
+            _preview = Line("Draft", transform, Amber, .002f);
             _preview.useWorldSpace = true;
             var panel = new GameObject("Room instructions", typeof(RectTransform), typeof(Canvas));
             _panel = panel.transform; _panel.SetParent(transform, false);
             panel.GetComponent<Canvas>().renderMode = RenderMode.WorldSpace;
-            var rect = (RectTransform)_panel; rect.sizeDelta = new Vector2(760, 400); rect.localScale = Vector3.one * .001f;
-            var image = panel.AddComponent<UnityEngine.UI.Image>(); image.color = new Color(.015f,.035f,.06f,.94f); image.raycastTarget = false;
-            _text = Label("Instructions", _panel, new Vector2(720, 360), 23);
+            var rect = (RectTransform)_panel; rect.sizeDelta = new Vector2(480, 330); rect.localScale = Vector3.one * .001f;
+            var image = panel.AddComponent<UnityEngine.UI.Image>(); image.color = new Color(.035f,.045f,.05f,.94f); image.raycastTarget = false;
+            _text = Label("Instructions", _panel, new Vector2(436, 290), 16);
         }
 
         UnityEngine.UI.Text Label(string name, Transform parent, Vector2 size, int fontSize)
@@ -64,7 +64,7 @@ namespace CutOnce.Room
             if (head == null) return;
             Vector3 forward = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
             if (forward.sqrMagnitude < .01f) forward = Vector3.forward;
-            _panel.position = head.position + forward * 1.2f + Vector3.down * .12f;
+            _panel.position = head.position + forward * 1.2f + Vector3.down * .35f;
             _panel.rotation = Quaternion.LookRotation(forward);
         }
 
@@ -75,23 +75,23 @@ namespace CutOnce.Room
             for (int i = 0; i < room.surfaces.Length && i < 40; i++)
             {
                 var surface = room.surfaces[i];
-                var line = Line(surface.label, frame, Cyan, .003f);
+                var line = Line(surface.label, frame, new Color(.65f,.75f,.72f,.25f), .001f);
                 line.loop = true; line.positionCount = surface.outline.Length; line.SetPositions(surface.outline);
                 _map.Add(line.gameObject);
             }
-            var boundary = Line("Room floor boundary (not Guardian)", frame, Amber, .006f);
+            var boundary = Line("Room floor boundary (not Guardian)", frame, Amber, .002f);
             boundary.loop = true; boundary.positionCount = room.floor.Length; boundary.SetPositions(room.floor); _map.Add(boundary.gameObject);
-            for (int i = 0; i < room.floor.Length && i < 24; i++)
+            for (int i = 0; i < room.floor.Length && i < 8; i++)
             {
                 var a = room.floor[i]; var b = room.floor[(i + 1) % room.floor.Length];
                 var go = new GameObject("Wall dimension", typeof(RectTransform), typeof(Canvas));
                 go.transform.SetParent(frame, false); go.GetComponent<Canvas>().renderMode = RenderMode.WorldSpace;
-                var rect = (RectTransform)go.transform; rect.sizeDelta = new Vector2(320, 65); rect.localScale = Vector3.one * .001f;
+                var rect = (RectTransform)go.transform; rect.sizeDelta = new Vector2(220, 42); rect.localScale = Vector3.one * .001f;
                 rect.localPosition = (a + b) * .5f + Vector3.up * .15f;
                 Vector3 inward = -new Vector3(rect.localPosition.x, 0, rect.localPosition.z);
                 if (inward.sqrMagnitude < .01f) inward = Vector3.forward;
                 rect.localRotation = Quaternion.LookRotation(-inward);
-                var label = Label("Metres", go.transform, new Vector2(320,65), 30);
+                var label = Label("Metres", go.transform, new Vector2(220,42), 16);
                 label.alignment = TextAnchor.MiddleCenter; label.text = Vector3.Distance(a,b).ToString("F2") + " m";
                 _map.Add(go);
             }
@@ -118,7 +118,7 @@ namespace CutOnce.Room
         public void CancelPreview() { if (_preview != null) _preview.positionCount = 0; }
         public void Add(RoomDrawing drawing)
         {
-            var line = Line(drawing.tool.ToString(), _frame, drawing.tool == DrawingTool.Measure ? Amber : Cyan, .004f);
+            var line = Line(drawing.tool.ToString(), _frame, drawing.tool == DrawingTool.Measure ? Amber : Cyan, .002f);
             line.positionCount = drawing.points.Length; line.SetPositions(drawing.points); _drawings.Add(line);
         }
         public void Undo()

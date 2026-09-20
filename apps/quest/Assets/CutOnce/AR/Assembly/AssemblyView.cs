@@ -87,6 +87,10 @@ namespace CutOnce.AR
             {
                 if (!visuals.TryGetValue(pair.Key, out var visual)) continue;
                 var style = palette.StyleFor(visual);
+                // Passthrough already has plenty of texture. Keep the part outline and state colour,
+                // but reserve animation for an actual problem rather than every current-step surface.
+                style.grid = false;
+                if (visual.Base != BaseVisual.WRONG) { style.pulseHz = 0; style.fillAlpha *= 0.4; }
                 style.dashed = pair.Value.Accuracy.IsApproximate;
                 pair.Value.Apply(style);
             }

@@ -29,7 +29,7 @@ namespace CutOnce.Device
         /// <summary>Where the run is kept between launches (Application.persistentDataPath). Tests set it aside.</summary>
         public const string JournalFolder = "cutonce-builds";
         /// <summary>What the HUD says while nothing is built: the app shows no hologram until Kit builds one.</summary>
-        public const string IdleHint = "Press A and ask Kit anything — \"What can I build?\" — then press A again to send.";
+        public const string IdleHint = "Press A to talk to Kit. Press again to send.";
 
         const float HighlightSeconds = 6f, RetrySeconds = 5f, WrongHoldSeconds = 0.8f, ScanButtonHoldSeconds = 1f;
 
@@ -93,7 +93,7 @@ namespace CutOnce.Device
                 _hud.gameObject.SetActive(!active);
                 _waitForMarkRelease = true;
             };
-            _hud.Toast("A: talk to Kit. Press once to start, again to send. Ask \"What can I build?\" and it does the rest.", 12f);
+            _hud.Toast("Try asking: What can I build?", 6f);
             // Build mode ("what can I build?"): off until a scan starts it, so other runs behave exactly as before.
             _build = gameObject.AddComponent<BuildMode>();
             _build.Init(_config, _api, _sync, _store, _assembly, _alignment, _input, surface, _hud, _material, _palette);
@@ -234,11 +234,6 @@ namespace CutOnce.Device
             if (_stream.Connects != _seenConnects) { _seenConnects = _stream.Connects; Run(_sync.CatchUp()); _build.OnStreamReconnected(); }   // (re)connected: fetch what was missed
             else if (!_sync.Online && Time.time > _nextRetry) { _nextRetry = Time.time + RetrySeconds; Run(_sync.CatchUp()); }
 
-            if (!_hudInFront && _alignment.State != AlignmentState.Locked && Camera.main != null)
-            {
-                _hud.StandInFrontOf(Camera.main.transform.position, Camera.main.transform.forward);
-                _hudInFront = true;
-            }
             if (_highlighted.Count > 0 && Time.time >= _highlightUntil) { _highlighted.Clear(); _dirty = true; }
             if (_alignment.State == AlignmentState.Locked) ReadMarkButton();
             while (_permissionAnswers.TryDequeue(out var answer))
@@ -251,6 +246,16 @@ namespace CutOnce.Device
             var x = _scanButton.Update(OVRInput.GetDown(OVRInput.RawButton.X), OVRInput.Get(OVRInput.RawButton.X), OVRInput.GetUp(OVRInput.RawButton.X), Time.deltaTime);
             if (x != ButtonGesture.None) _build.OnScanButton(x);
             if (_dirty) Refresh();
+        }
+
+        void LateUpdate()
+        {
+            // XR supplies its first pose after Awake/Start. Wait for tracking and updated anchors
+            // before world-locking the panel, otherwise it is placed relative to the floor origin.
+            if (_hudInFront || _alignment.State == AlignmentState.Locked || Camera.main == null) return;
+            if (OVRManager.instance != null && !OVRManager.tracker.isPositionTracked) return;
+            _hud.StandInFrontOf(Camera.main.transform.position, Camera.main.transform.forward);
+            _hudInFront = true;
         }
 
         /// <summary>B on the pointed part: a press toggles built / missing (so it is also the undo); holding it flags the part wrong.</summary>

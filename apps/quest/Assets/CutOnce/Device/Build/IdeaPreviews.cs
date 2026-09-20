@@ -26,6 +26,7 @@ namespace CutOnce.Device
             toViewer.Normalize();
             var right = Vector3.Cross(toViewer, Vector3.up);                     // the viewer's right in Unity's left-handed frame
             var style = palette.StyleFor(new PartVisual { Base = BaseVisual.CURRENT_STEP });
+            style.grid = false; style.pulseHz = 0; style.fillAlpha = 0.08;
             var shown = new List<BuildIdeaDto>();
             foreach (var idea in ideas) if (shown.Count < MaxShown && idea?.idea_id != null && idea.plan?.parts != null) shown.Add(idea);
             for (int i = 0; i < shown.Count; i++)

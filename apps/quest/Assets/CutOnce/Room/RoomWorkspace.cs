@@ -220,9 +220,9 @@ namespace CutOnce.Room
                     if (Tool == DrawingTool.Measure && _stage > 0) details += $"\nDistance: {Vector3.Distance(_first,_target):F3} m";
                     else if (_lastMeasurement.Length > 0) details += "\n" + _lastMeasurement;
                     string action = Tool == DrawingTool.Freehand ? "Hold right trigger to draw." : Tool == DrawingTool.Box ? "Trigger: footprint corners, then height." : "Trigger: two measurement endpoints.";
-                    _view.ShowText($"<color=#40D9FF><b>ROOM WORKSPACE  /  {Tool.ToString().ToUpperInvariant()}</b></color>\n" +
+                    _view.ShowText($"<color=#94D1BA><b>Room · {Tool}</b></color>\n" +
                         (Source?.Status ?? "Opening room…") + "\n" + details + "\n\n" + (_store.Error ?? _hint) + "\n" + action +
-                        "\nLeft grip: snap to scanned surface • left stick click: tool\nB: undo / cancel • Y: rescan • X: return to build\n<color=#FFC060>Amber outline = room, not Quest safety boundary.</color>");
+                        "\nGrip: surface snap · left stick click: change tool\nB: undo · Y: rescan · X: close\n<color=#D9BD88>Room outline is not your safety boundary.</color>");
                 }
                 yield return delay;
             }
