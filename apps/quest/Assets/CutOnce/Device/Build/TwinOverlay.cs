@@ -25,11 +25,8 @@ namespace CutOnce.Device
             Clear();
             if (inventory?.twins == null) return;
             var named = _palette.StyleFor(new PartVisual { Base = BaseVisual.CURRENT_STEP });
-            // Loud enough to read over real passthrough (the scan beat is a demo moment): the first
-            // pass used 0.04/0.45 and the twins were nearly invisible on the headset.
-            named.grid = false; named.pulseHz = 0; named.fillAlpha = 0.12f; named.edgeAlpha = 0.9f; named.edgeWidthPx = 2.5;
+            named.grid = false; named.pulseHz = 0; named.fillAlpha = 0.04f; named.edgeAlpha = 0.45f;
             var unnamed = _palette.StyleFor(new PartVisual { Base = BaseVisual.FUTURE });
-            unnamed = unnamed.Clone(); unnamed.edgeAlpha = 0.55f; unnamed.fillAlpha = 0.06f;
             foreach (var t in inventory.twins)
             {
                 if (_twins.Count >= MaxShown) break;
