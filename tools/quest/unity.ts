@@ -8,6 +8,7 @@
  *   pnpm quest:build     build the APK the headset installs (apps/quest/Builds/CutOnce.apk)
  *   pnpm quest:surface-proof render and verify the surface shader against synthetic measured depth
  *   pnpm quest:recognition-proof run the real detector on pinned photos and check names/box overlap
+ *   pnpm quest:convert-model export a pinned full-precision candidate for explicit model comparison
  *   pnpm quest:install   install that APK on a Quest plugged in by USB-C and start it
  *
  * The Editor must be closed: Unity allows one instance per project. With it open, the Cut Once menu runs the
@@ -321,6 +322,22 @@ function surfaceProof(): number {
   return 0;
 }
 
+/** Explicit candidate generation; ordinary builds never download or replace the bundled model. */
+function convertModel(): number {
+  const download = spawnSync(process.execPath, [join(ROOT, "tools/quest/download-recognition-model.mjs")], { stdio: "inherit" });
+  if (download.status !== 0) return download.status ?? 1;
+  const report = join(LOGS, "model-conversion", "report.json");
+  fresh(report);
+  const run = unity("model-conversion", ["-executeMethod", "CutOnce.Vision.Editor.ExportRecognitionModel.Run", "-quit"], { minutes: 15 });
+  if (run.code !== 0) return run.code;
+  if (!existsSync(report) || JSON.parse(readFileSync(report, "utf8")).passed !== true) {
+    console.error("Full-precision model conversion did not produce a passing report.");
+    return 1;
+  }
+  console.log(`Candidate model exported: ${report}. Recognition and Quest performance are not verified by conversion.`);
+  return 0;
+}
+
 /** The production model/preprocessor on recorded photos; deliberately not claimed as a headset test. */
 function recognitionProof(): number {
   const download = spawnSync(process.execPath, [join(ROOT, "tools/quest/download-recognition-fixtures.mjs")], { stdio: "inherit" });
@@ -362,7 +379,7 @@ function install(): number {
   return 0;
 }
 
-const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof, "recognition-proof": recognitionProof };
+const commands: Record<string, () => number> = { setup, check, sim, play, build, install, "surface-proof": surfaceProof, "recognition-proof": recognitionProof, "convert-model": convertModel };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const name = process.argv[2] ?? "";
   const cmd = commands[name];

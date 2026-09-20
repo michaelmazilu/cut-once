@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Meta.XR;
-using Meta.XR.MRUtilityKit;
 using UnityEngine;
 
 namespace CutOnce.Vision
@@ -51,9 +50,6 @@ namespace CutOnce.Vision
         public float minSizeM = 0.05f;
         public float maxSizeM = 1.2f;
 
-        [Tooltip("Used only where there is no depth sensing (running from the Editor over Link): how far down the ray to put an object the room's own planes did not catch.")]
-        public float fallbackDistance = 2f;
-
         public int LastAttempts { get; private set; }
         public int LastSuccesses { get; private set; }
         public string LastFailureReason { get; private set; } = "";
@@ -75,7 +71,7 @@ namespace CutOnce.Vision
         private void TryBindRaycast()
         {
             // XR can become ready after Awake. A one-shot support check permanently stranded the
-            // locator in its room-plane fallback even after real depth raycasting became available.
+            // locator without real depth raycasting even after it became available.
             // Retry only while unbound, at most once a second; no per-frame scene lookup or allocation.
             if (_raycast != null || Time.unscaledTime < _nextRaycastBindAt) return;
             _nextRaycastBindAt = Time.unscaledTime + 1f;
@@ -93,28 +89,6 @@ namespace CutOnce.Vision
             if (_raycast == null) _raycast = gameObject.AddComponent<EnvironmentRaycastManager>();
             LastFailureReason = "";
         }
-
-        /// <summary>
-        /// Where there is no depth sensing — running from the Editor over Meta Horizon Link, or a simulator without
-        /// it — an object still gets a place, so the room lights up and the pipeline can be watched end to end. It
-        /// lands on the room's own surfaces (MRUK's planes and volumes), which means the desk UNDER the bottle or the
-        /// wall BEHIND it, not the bottle: near enough to see it working, never good enough to build from. Says so.
-        /// </summary>
-        bool LocateWithoutDepth(Ray centreRay, out Vector3 world)
-        {
-            if (!_warnedNoDepth)
-            {
-                _warnedNoDepth = true;
-                Debug.LogWarning("[Vision] no depth sensing here: objects are placed on the room's surfaces (the desk under a thing, or the wall behind it), " +
-                                 "not on the thing itself. Real positions need the headset.");
-            }
-            var room = MRUK.Instance != null ? MRUK.Instance.GetCurrentRoom() : null;
-            if (room != null && room.Raycast(centreRay, maxDistance, out var hit)) { world = hit.point; return true; }
-            world = centreRay.origin + centreRay.direction * fallbackDistance;
-            return true;
-        }
-
-        bool _warnedNoDepth;
 
         /// <summary>Position only; size discarded. Kept because diagnostics and older callers use it.</summary>
         public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world)
@@ -137,23 +111,21 @@ namespace CutOnce.Vision
             world = default;
             size = new Vector3(0.25f, 0.25f, 0.25f);
             LastAttempts++;
-            var box = detection.boundingBox;
             var input = detection.inputSize;
-            if (input.x <= 0f || input.y <= 0f) { LastFailureReason = "bad input size"; return false; }
+            if (!TryGetVisibleBox(detection.boundingBox, input, out var box))
+            { LastFailureReason = "invalid or off-image detection bounds"; return false; }
+            if (_camera == null || !_camera.IsReady)
+            { LastFailureReason = "camera calibration/frame unavailable"; return false; }
 
             if (_raycast == null) TryBindRaycast();
-            var centreRay = RayThrough(box.center, input, cameraPose);
-            if (_raycast == null)                                    // no depth sensing: the room's surfaces instead of nothing at all
+            if (_raycast == null || !_raycast.isActiveAndEnabled || !EnvironmentRaycastManager.IsSupported)
             {
-                LastSuccesses++;
-                var placed = LocateWithoutDepth(centreRay, out world);
-                if (placed)
-                {
-                    var forwardDepth = Vector3.Dot(world - cameraPose.position, cameraPose.rotation * Vector3.forward);
-                    size = SizeAt(forwardDepth, box, input, cameraPose, detection.className);
-                }
-                return placed;
+                // A room plane behind a bottle (or a fixed distance) is not its measured position.
+                // Keep scanning; the next batch can locate it once XR depth becomes ready.
+                LastFailureReason = "measured object depth unavailable";
+                return false;
             }
+            var centreRay = RayThrough(box.center, input, cameraPose);
             var forward = cameraPose.rotation * Vector3.forward;
 
             _distances.Clear();
@@ -204,6 +176,24 @@ namespace CutOnce.Vision
             LastFailureReason = "";
             return true;
         }
+
+        /// <summary>Only observed camera pixels may generate depth rays, including partial objects at image edges.</summary>
+        public static bool TryGetVisibleBox(Rect box, Vector2 input, out Rect visible)
+        {
+            visible = default;
+            if (!Finite(input.x) || !Finite(input.y) || input.x <= 0f || input.y <= 0f ||
+                !Finite(box.x) || !Finite(box.y) || !Finite(box.width) || !Finite(box.height) ||
+                box.width <= 0f || box.height <= 0f || !Finite(box.xMax) || !Finite(box.yMax)) return false;
+            var left = Mathf.Max(0f, box.xMin);
+            var top = Mathf.Max(0f, box.yMin);
+            var right = Mathf.Min(input.x, box.xMax);
+            var bottom = Mathf.Min(input.y, box.yMax);
+            if (right <= left || bottom <= top) return false;
+            visible = Rect.MinMaxRect(left, top, right, bottom);
+            return true;
+        }
+
+        private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
         /// <summary>
         /// Rays through all four edge midpoints intersect one camera-forward depth plane. Equal

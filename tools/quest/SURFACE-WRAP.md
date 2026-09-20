@@ -11,6 +11,11 @@ Without depth, labels say `DEPTH UNAVAILABLE`. A detection fades between 0.5 and
 0.75 seconds old, then its surface disappears and the label says `REACQUIRING`.
 Holding both thumbsticks for one second explicitly enables diagnostic boxes.
 
+New world positions require measured environment-depth rays. Missing calibration,
+unsupported depth, and off-image detections do not become guessed two-metre
+positions or points on room planes. Rejected depth jumps do not refresh an old
+track's timestamp or count toward confirmation; it ages out normally.
+
 RoomSense's room-wide glow and guessed gaze labels are suppressed while Vision
 owns recognition. Its MRUK room geometry, anchors and colliders remain active.
 This policy applies to both existing and later-created RoomSense components.
@@ -99,6 +104,21 @@ table 0.185). **Overall recognition acceptance remains failing: one of two
 photos passes.** The workflow did not build a new APK from this revision.
 Do not substitute these Mac timings or recorded-image results for a live Quest
 camera, stereo registration or frame-rate test; the headset was disconnected.
+
+An explicit `model_precision=float32-candidate` Mac workflow run compares the
+same upstream model without weight quantization. `pnpm quest:convert-model`
+downloads a SHA-256-pinned editor-only ONNX and reproduces Meta's three-output
+graph in Unity 2.6.1, preserving the runtime asset GUID. The isolated run uploads
+the candidate, original backup, license/provenance and conversion report. Normal
+builds keep the bundled model unchanged. Conversion is not recognition proof:
+the unchanged photo acceptance checks must still pass before an APK is built.
+
+The same manual workflow supports `mode=device-status`, or run
+`pnpm quest:device-status` on the Mac. This only inspects an authorized USB Quest
+using Unity's bundled ADB; it does not install/launch the app, grant permissions,
+capture camera pixels or collect logcat. Its redacted connection/app/health report
+is not a live recognition or frame-rate test. A disconnected headset is reported
+as unavailable, never as a successful hardware check.
 
 Photo URLs, SHA-256 digests, original Flickr sources and CC BY 2.0 license links
 are recorded in `tools/quest/fixtures/recognition-coco.json`. Inputs are downloaded

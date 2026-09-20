@@ -6,6 +6,49 @@ namespace CutOnce.Vision.Tests
     public sealed class Object3DLocatorTests
     {
         [Test]
+        public void PartialObjectsOnlyGenerateRaysThroughVisiblePixels()
+        {
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(-20f, -10f, 100f, 80f),
+                new Vector2(640f, 480f), out var clipped), Is.True);
+            Assert.That(clipped, Is.EqualTo(new Rect(0f, 0f, 80f, 70f)));
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(600f, 450f, 100f, 80f),
+                new Vector2(640f, 480f), out clipped), Is.True);
+            Assert.That(clipped, Is.EqualTo(new Rect(600f, 450f, 40f, 30f)));
+        }
+
+        [Test]
+        public void InvalidOrCompletelyOffscreenBoxesCannotGenerateDepthRays()
+        {
+            var image = new Vector2(640f, 480f);
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(-100f, 0f, 50f, 50f), image, out _), Is.False);
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(640f, 0f, 50f, 50f), image, out _), Is.False);
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(0f, 0f, 0f, 50f), image, out _), Is.False);
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(float.NaN, 0f, 50f, 50f), image, out _), Is.False);
+            Assert.That(Object3DLocator.TryGetVisibleBox(new Rect(0f, 0f, 50f, 50f),
+                new Vector2(float.PositiveInfinity, 480f), out _), Is.False);
+        }
+
+        [Test]
+        public void MissingCameraCannotBecomeAGuessedWorldPosition()
+        {
+            var go = new GameObject("No guessed object positions");
+            try
+            {
+                var locator = go.AddComponent<Object3DLocator>();
+                var detection = new DetectedObject
+                {
+                    className = "bottle", boundingBox = new Rect(100, 100, 50, 150),
+                    inputSize = new Vector2(640, 480),
+                };
+                Assert.That(locator.TryLocate(detection, new Pose(Vector3.zero, Quaternion.identity), out var world), Is.False);
+                Assert.That(world, Is.EqualTo(Vector3.zero));
+                Assert.That(locator.LastSuccesses, Is.Zero);
+                Assert.That(locator.LastFailureReason, Is.Not.Empty);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
         public void OffAxisEdgesMeetOneDepthPlaneAndPreserveMeasuredWidth()
         {
             var pose = new Pose(new Vector3(4f, 1.5f, -2f), Quaternion.Euler(20f, 70f, 12f));

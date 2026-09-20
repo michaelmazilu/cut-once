@@ -4,6 +4,23 @@ name: Quest Mac build
 # Dispatch only a branch/commit you have reviewed and trust.
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Build/test the app, or inspect an attached Quest without changing it
+        type: choice
+        required: true
+        default: build
+        options:
+          - build
+          - device-status
+      model_precision:
+        description: Use bundled model weights, or test the reviewed float32 conversion candidate
+        type: choice
+        required: true
+        default: bundled
+        options:
+          - bundled
+          - float32-candidate
 
 permissions:
   contents: read
@@ -14,6 +31,7 @@ concurrency:
 
 jobs:
   quest:
+    if: ${{ inputs.mode != 'device-status' }}
     runs-on: [self-hosted, macOS, cutonce-unity]
     timeout-minutes: 120
     env:
@@ -55,6 +73,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Apply Quest settings
         run: caffeinate -i pnpm quest:setup
+      - name: Convert and install float32 model candidate in the isolated build checkout
+        id: convert_model
+        if: ${{ inputs.model_precision == 'float32-candidate' }}
+        run: caffeinate -i pnpm quest:convert-model
+      - name: Upload converted model candidate and conversion report
+        if: ${{ always() && inputs.model_precision == 'float32-candidate' && steps.convert_model.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-model-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Assets/CutOnce/Vision/Resources/yolov9sentis.sentis
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/model-conversion/
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/model-conversion.log
+            ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Logs/cli/convert-model.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Compile, test, and check Quest readiness
         run: caffeinate -i pnpm quest:check
       - name: Verify actual model recognition on recorded photos
@@ -105,3 +139,43 @@ jobs:
           path: ${{ env.QUEST_BUILD_ROOT }}/apps/quest/Builds/CutOnce.apk
           if-no-files-found: error
           retention-days: 7
+
+  device-status:
+    if: ${{ inputs.mode == 'device-status' }}
+    runs-on: [self-hosted, macOS, cutonce-unity]
+    timeout-minutes: 5
+    env:
+      QUEST_PROBE_ROOT: ${{ github.workspace }}/quest-device-status-${{ github.run_id }}-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/quest-device-status-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out trusted diagnostic code into an isolated folder
+        working-directory: ${{ github.workspace }}
+        run: |
+          # No checkout cleanup, Unity project import, package install, or LFS download.
+          # Only manually dispatch a reviewed branch: this code executes as the Mac user.
+          mkdir "$QUEST_PROBE_ROOT"
+          git init "$QUEST_PROBE_ROOT"
+          cd "$QUEST_PROBE_ROOT"
+          git remote add origin https://github.com/michaelmazilu/kitbash.git
+          git -c credential.helper= fetch --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout init --no-cone
+          git sparse-checkout set '/tools/quest/device-status.mjs' '/tools/quest/node-tests/device-status.test.mjs' '/apps/quest/ProjectSettings/ProjectVersion.txt'
+          git -c credential.helper= checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify diagnostic command boundaries with mocked ADB
+        run: node --test tools/quest/node-tests/device-status.test.mjs
+      - name: Read authorized USB Quest status
+        run: node tools/quest/device-status.mjs
+      - name: Upload redacted device status only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-device-status-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUEST_PROBE_ROOT }}/apps/quest/Logs/cli/device-status/report.json
+          if-no-files-found: warn
+          retention-days: 3

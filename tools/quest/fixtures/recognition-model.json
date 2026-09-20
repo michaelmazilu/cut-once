@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "modelName": "YOLOv9t",
+  "sourceCommit": "b48d61dd43ffafbd2e2de3ae63fa3719685391c3",
+  "sourceUrl": "https://raw.githubusercontent.com/oculus-samples/Unity-PassthroughCameraApiSamples/b48d61dd43ffafbd2e2de3ae63fa3719685391c3/Assets/PassthroughCameraApiSamples/MultiObjectDetection/SentisInference/Model/yolov9onnx.onnx",
+  "sourceSha256": "189ed26d273423b02243ce7f0a7795acc7da8049f879f8b73a0684d25d1138fd",
+  "sourceBytes": 8331824,
+  "sourceAssetPath": "Assets/CutOnce/Vision/Editor/ModelSource/yolov9-source.onnx",
+  "sourceAssetGuid": "c6d565dab13541c397253979487e9a6d",
+  "license": "MIT",
+  "licenseUrl": "https://raw.githubusercontent.com/MultimediaTechLab/YOLO/462b87edcaa795663ecb6450abf3e84b8d3aa823/LICENSE",
+  "licenseNoticeAssetPath": "Assets/CutOnce/Vision/Editor/ModelSource/MODEL-LICENSE.txt",
+  "outputAssetPath": "Assets/CutOnce/Vision/Resources/yolov9sentis.sentis",
+  "precision": "FP32 (no weight quantization)",
+  "outputGraph": "Same Meta converter: corners via center-to-corners MatMul; class IDs via ArgMax; scores via ReduceMax. Class-aware NMS remains in YoloDetector."
+}

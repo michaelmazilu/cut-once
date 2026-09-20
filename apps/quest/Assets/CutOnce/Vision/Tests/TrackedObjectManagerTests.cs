@@ -107,6 +107,102 @@ namespace CutOnce.Vision.Tests
             Assert.That(_tracker.Objects.Count, Is.EqualTo(2));
         }
 
+        [Test]
+        public void RejectedJumpDoesNotConfirmOrRefreshAnyAcceptedMeasurement()
+        {
+            _tracker.associationDistance = 0.75f; // The jump gate must be inside association reach.
+            var position = new Vector3(0f, 1f, 2f);
+            var tracked = ObserveBottle(position);
+            _observed.Clear();
+            Assert.That(ObserveBottle(position), Is.SameAs(tracked));
+            Assert.That(tracked.consecutiveHits, Is.EqualTo(2));
+            tracked.lastSeenTime = Time.time - 1f;
+            var acceptedAt = tracked.lastSeenTime;
+            var badMeasurement = new DetectedObject { classId = 39, className = "untrusted label", confidence = 1f };
+
+            _observed.Clear();
+            var rejected = _tracker.Observe(badMeasurement, position + Vector3.right * 0.6f, Vector3.one * 5f, _observed);
+            _observed.Add(rejected.id); // Real caller reserves the returned association even on rejection.
+            _tracker.EndFrame(_observed);
+
+            Assert.That(rejected, Is.SameAs(tracked));
+            Assert.That(_tracker.Objects.Count, Is.EqualTo(1));
+            Assert.That(tracked.visible, Is.False, "A rejected third sighting must not promote stale geometry.");
+            Assert.That(tracked.consecutiveHits, Is.Zero);
+            Assert.That(tracked.totalHits, Is.EqualTo(2));
+            Assert.That(tracked.lastSeenTime, Is.EqualTo(acceptedAt));
+            Assert.That(tracked.className, Is.EqualTo("bottle"));
+            Assert.That(tracked.confidence, Is.EqualTo(Bottle.confidence));
+            Assert.That(tracked.worldPosition, Is.EqualTo(position));
+            Assert.That(tracked.smoothedWorldPosition, Is.EqualTo(position));
+            Assert.That(tracked.worldSize, Is.EqualTo(BottleSize));
+            Assert.That(tracked.smoothedWorldSize, Is.EqualTo(BottleSize));
+        }
+
+        [Test]
+        public void RepeatedRejectedJumpsDoNotKeepAConfirmedObjectAlive()
+        {
+            _tracker.associationDistance = 0.75f;
+            var position = new Vector3(0f, 1f, 2f);
+            var tracked = ObserveBottle(position);
+            for (var frame = 0; frame < 2; frame++) { _observed.Clear(); ObserveBottle(position); }
+            Assert.That(tracked.visible, Is.True);
+
+            // A temporarily unseen confirmed object still keeps the ordinary keep-alive window.
+            tracked.lastSeenTime = Time.time - _tracker.keepAliveSeconds * 0.5f;
+            Assert.That(_tracker.Prune().Count, Is.Zero);
+            Assert.That(_tracker.VisibleCount, Is.EqualTo(1));
+            tracked.lastSeenTime = Time.time - _tracker.keepAliveSeconds - 0.1f;
+            var acceptedAt = tracked.lastSeenTime;
+            for (var frame = 0; frame < 4; frame++)
+            {
+                _observed.Clear();
+                Assert.That(ObserveBottle(position + Vector3.right * 0.6f), Is.SameAs(tracked));
+                _tracker.EndFrame(_observed);
+            }
+
+            Assert.That(tracked.lastSeenTime, Is.EqualTo(acceptedAt));
+            Assert.That(tracked.totalHits, Is.EqualTo(3));
+            var removed = _tracker.Prune();
+            Assert.That(removed, Has.Count.EqualTo(1));
+            Assert.That(removed[0], Is.SameAs(tracked));
+            Assert.That(_tracker.Objects, Is.Empty);
+            Assert.That(_tracker.VisibleCount, Is.Zero);
+        }
+
+        [Test]
+        public void ValidObservationAfterARejectedJumpRefreshesAndStartsANewConfirmationStreak()
+        {
+            _tracker.associationDistance = 0.75f;
+            var position = new Vector3(0f, 1f, 2f);
+            var tracked = ObserveBottle(position);
+            _observed.Clear();
+            ObserveBottle(position);
+            _observed.Clear();
+            ObserveBottle(position + Vector3.right * 0.6f);
+            tracked.lastSeenTime = Time.time - 1f;
+            var nextPosition = position + Vector3.right * 0.02f;
+            var nextSize = BottleSize * 1.1f;
+
+            _observed.Clear();
+            var accepted = _tracker.Observe(Bottle, nextPosition, nextSize, _observed);
+            _observed.Add(accepted.id);
+            _tracker.EndFrame(_observed);
+
+            Assert.That(accepted, Is.SameAs(tracked));
+            Assert.That(tracked.lastSeenTime, Is.EqualTo(Time.time));
+            Assert.That(tracked.totalHits, Is.EqualTo(3), "Only the three valid observations count.");
+            Assert.That(tracked.consecutiveHits, Is.EqualTo(1));
+            Assert.That(tracked.visible, Is.False);
+            Assert.That(tracked.worldPosition, Is.EqualTo(nextPosition));
+            Assert.That(tracked.smoothedWorldPosition, Is.EqualTo(nextPosition));
+            Assert.That(tracked.worldSize, Is.EqualTo(nextSize));
+            Assert.That(tracked.smoothedWorldSize, Is.EqualTo(nextSize));
+            for (var frame = 0; frame < 2; frame++) { _observed.Clear(); ObserveBottle(nextPosition); }
+            Assert.That(tracked.visible, Is.True, "Subsequent valid nearby observations still promote the same object.");
+            Assert.That(_tracker.Objects, Has.Count.EqualTo(1));
+        }
+
         private TrackedObject ObserveBottle(Vector3 position)
         {
             var tracked = _tracker.Observe(Bottle, position, BottleSize, _observed);

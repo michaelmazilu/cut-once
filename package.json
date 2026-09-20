@@ -40,6 +40,8 @@
     "quest:build": "tsx tools/quest/unity.ts build",
     "quest:surface-proof": "tsx tools/quest/unity.ts surface-proof",
     "quest:recognition-proof": "tsx tools/quest/unity.ts recognition-proof",
+    "quest:convert-model": "tsx tools/quest/unity.ts convert-model",
+    "quest:device-status": "node tools/quest/device-status.mjs",
     "quest:install": "tsx tools/quest/unity.ts install"
   },
   "devDependencies": {

@@ -97,17 +97,22 @@ namespace CutOnce.Vision
             else
             {
                 // A wild jump is nearly always a depth sample that found the wall behind the object,
-                // not the object teleporting. Count the sighting, ignore the position.
+                // not the object teleporting. It is not evidence that the OLD geometry is still fresh:
+                // do not refresh its timestamp, confidence, hit counts, or raw/smoothed geometry.
+                // Return the association for the caller's one-to-one batch reservation, but break
+                // its confirmation streak exactly as an unobserved track would lose its streak.
                 var jumped = Vector3.Distance(match.smoothedWorldPosition, world) > jumpRejectDistance;
+                if (jumped)
+                {
+                    match.consecutiveHits = 0;
+                    return match;
+                }
                 match.worldPosition = world;
                 match.worldSize = worldSize;
-                if (!jumped)
-                {
-                    match.smoothedWorldPosition = Vector3.Lerp(match.smoothedWorldPosition, world, positionSmoothing);
-                    // Size rides the same smoothing and the same jump gate: a bad depth batch mis-sizes
-                    // exactly when it mis-places, so both are rejected together.
-                    match.smoothedWorldSize = Vector3.Lerp(match.smoothedWorldSize, worldSize, positionSmoothing);
-                }
+                match.smoothedWorldPosition = Vector3.Lerp(match.smoothedWorldPosition, world, positionSmoothing);
+                // Size rides the same smoothing and the same jump gate: a bad depth batch mis-sizes
+                // exactly when it mis-places, so both are rejected together.
+                match.smoothedWorldSize = Vector3.Lerp(match.smoothedWorldSize, worldSize, positionSmoothing);
             }
 
             match.className = detection.className;
