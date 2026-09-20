@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitbash — how it works</title>
+<meta name="description" content="How Kitbash turns the objects on your table into holograms you can build with: one photo, 12,288 depth rays, digital twins, and a copilot that designs with exactly what you have.">
+<meta property="og:title" content="Kitbash — how it works">
+<meta property="og:description" content="One photo, 12,288 depth rays, digital twins, and a copilot that designs with exactly what's on your table.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23070b12'/><rect x='7' y='13' width='11' height='11' fill='none' stroke='%2322d3ee' stroke-width='2'/><ellipse cx='22' cy='11' rx='4' ry='1.8' fill='none' stroke='%233ddc84' stroke-width='2'/><path d='M18 11v9a4 1.8 0 0 0 8 0v-9' fill='none' stroke='%233ddc84' stroke-width='2'/></svg>">
+<style>
+  :root{
+    --bg:#070b12; --bg-2:#0b1220; --panel:#0d1524; --line:#1b2940;
+    --ink:#e9f2f9; --dim:#93a7bd; --faint:#64798f;
+    --cyan:#22d3ee; --cyan-2:#67e8f9; --green:#3ddc84; --blue:#4da3ff;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --wrap:1060px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+    font-size:17px; line-height:1.6; -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(1200px 600px at 50% -10%, #10243a 0%, transparent 60%);
+  }
+  a{color:var(--cyan-2)}
+  .wrap{width:100%; max-width:var(--wrap); margin:0 auto; padding:0 16px}
+
+  header{position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);
+    background:rgba(7,11,18,.72); border-bottom:1px solid var(--line)}
+  .bar{display:flex; align-items:center; justify-content:space-between; height:56px}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:650; letter-spacing:.2px}
+  .brand svg{display:block}
+  .bar a{color:var(--dim); text-decoration:none; font-size:15px}
+  .bar a:hover{color:var(--ink)}
+
+  .hero{padding:72px 0 40px; text-align:center}
+  .eyebrow{font:600 13px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--cyan); margin:0 0 18px}
+  h1{font-size:clamp(44px,9vw,84px); line-height:.98; margin:0 0 18px; letter-spacing:-.03em; font-weight:700}
+  .lead{font-size:clamp(18px,2.4vw,22px); color:var(--dim); max-width:640px; margin:0 auto 14px}
+  .lead strong{color:var(--ink); font-weight:600}
+  .hint{font:500 14px/1 var(--mono); color:var(--faint); margin-top:34px}
+
+  .steps{list-style:none; margin:40px 0 0; padding:0; display:grid; gap:22px}
+  .step{background:linear-gradient(180deg,var(--panel),var(--bg-2)); border:1px solid var(--line);
+    border-radius:18px; padding:26px; display:grid; gap:22px; grid-template-columns:1fr; align-items:center}
+  @media(min-width:860px){
+    .step{grid-template-columns:minmax(0,420px) minmax(0,1fr); padding:32px}
+    .step:nth-child(even) .copy{order:2}
+  }
+  .n{display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
+    border-radius:9px; border:1px solid rgba(34,211,238,.45); color:var(--cyan-2);
+    font:600 14px/1 var(--mono); margin-bottom:14px; background:rgba(34,211,238,.08)}
+  .step h2{font-size:clamp(22px,3vw,27px); margin:0 0 10px; letter-spacing:-.01em}
+  .step p{margin:0 0 16px; color:var(--dim)}
+  .facts{display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none}
+  .facts li{font:500 13px/1.35 var(--mono); color:var(--cyan-2); background:rgba(34,211,238,.08);
+    border:1px solid rgba(34,211,238,.22); border-radius:999px; padding:6px 11px}
+  .art{background:#060a11; border:1px solid var(--line); border-radius:14px; overflow:hidden}
+  .art svg{display:block; width:100%; height:auto}
+
+  section.block{margin:70px 0}
+  section.block h2{font-size:clamp(24px,3.4vw,32px); margin:0 0 8px; letter-spacing:-.02em}
+  section.block .sub{color:var(--dim); margin:0 0 24px}
+  .cards{display:grid; gap:14px; grid-template-columns:1fr}
+  @media(min-width:760px){.cards{grid-template-columns:repeat(3,1fr)}}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px}
+  .card h3{margin:0 0 8px; font-size:17px; display:flex; align-items:center; gap:9px}
+  .card p{margin:0; color:var(--dim); font-size:15.5px}
+  .dot{width:9px; height:9px; border-radius:50%; flex:none}
+  .dot.live{background:var(--green); box-shadow:0 0 12px var(--green)}
+  .dot.reuse{background:var(--blue); box-shadow:0 0 12px var(--blue)}
+  .dot.never{background:var(--cyan); box-shadow:0 0 12px var(--cyan)}
+
+  .chips{display:flex; flex-wrap:wrap; gap:9px; padding:0; margin:0; list-style:none}
+  .chips li{border:1px solid var(--line); background:var(--panel); border-radius:999px;
+    padding:8px 14px; font-size:14.5px; color:var(--dim)}
+  .chips li b{color:var(--ink); font-weight:600}
+
+  footer{border-top:1px solid var(--line); margin-top:70px; padding:28px 0 60px; color:var(--faint); font-size:15px}
+  footer .row{display:flex; flex-wrap:wrap; gap:10px 22px; justify-content:space-between}
+
+  /* ── diagrams ───────────────────────────────────────────────────────── */
+  .obj-fill{fill:#16202f}
+  .obj-top{fill:#1d2a3c}
+  .obj-line{stroke:#40536b; stroke-width:1.5; fill:none}
+  .table-top{fill:#111a27}
+  .table-edge{fill:#0c131e}
+  .ghost-fill{fill:var(--cyan); fill-opacity:.16}
+  .ghost-edge{stroke:var(--cyan-2); stroke-width:2; fill:none}
+  .built-edge{stroke:var(--green); stroke-width:2; fill:none}
+  .built-fill{fill:var(--green); fill-opacity:.14}
+  .ray{stroke:var(--cyan); stroke-width:.8; stroke-opacity:.5}
+  .hit{fill:var(--cyan-2)}
+  .cap{font:500 12px var(--mono); fill:var(--faint)}
+  .tag{font:600 12px var(--mono); fill:#04121a}
+  .tagbox{fill:var(--cyan-2)}
+  .flash{fill:#dff7ff}
+
+  /* animations run once the step scrolls in */
+  .anim{opacity:0}
+  .in .anim{opacity:1}
+  .in .fade{animation:fade .6s ease both}
+  .in .draw{animation:draw 1.1s ease forwards}
+  .in .pop{animation:pop .5s cubic-bezier(.2,1.3,.4,1) both}
+  .in .sweep{animation:sweep 2.4s ease-in-out infinite}
+  .in .pulse{animation:pulse 1.7s ease-in-out infinite}
+  .in .slidein{animation:slidein 1.6s cubic-bezier(.4,0,.2,1) forwards}
+  .in .flashit{animation:flashit 2.6s ease-out infinite}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes pop{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
+  @keyframes draw{from{stroke-dashoffset:var(--len,400)}to{stroke-dashoffset:0}}
+  @keyframes sweep{0%{transform:translateY(-6px);opacity:0}8%{opacity:1}92%{opacity:1}100%{transform:translateY(150px);opacity:0}}
+  @keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+  @keyframes slidein{from{transform:translate(0,0)}to{transform:translate(var(--dx,0),var(--dy,0))}}
+  @keyframes flashit{0%{opacity:0}4%{opacity:.5}16%{opacity:0}100%{opacity:0}}
+  @media(prefers-reduced-motion:reduce){
+    .anim{opacity:1}
+    .in .fade,.in .draw,.in .pop,.in .sweep,.in .pulse,.in .slidein,.in .flashit{animation:none}
+    .draw{stroke-dashoffset:0 !important}
+    .slidein{transform:translate(var(--dx,0),var(--dy,0))}
+  }
+</style>
+</head>
+<body>
+
+<!-- shared shapes -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <g id="can">
+    <path class="obj-fill" d="M-24,-80 V0 a24,8 0 0 0 48,0 V-80 z"/>
+    <ellipse class="obj-top" cx="0" cy="-80" rx="24" ry="8"/>
+    <path class="obj-line" d="M-24,-80 V0 a24,8 0 0 0 48,0 V-80"/>
+    <ellipse class="obj-line" cx="0" cy="-80" rx="24" ry="8"/>
+  </g>
+  <g id="box">
+    <path class="obj-fill" d="M-45,-56 H45 V0 H-45 z"/>
+    <path class="obj-top" d="M-45,-56 H45 L63,-73 H-27 z"/>
+    <path class="obj-fill" d="M45,-56 L63,-73 V-17 L45,0 z"/>
+    <path class="obj-line" d="M-45,0 V-56 H45 V0 z M-45,-56 L-27,-73 H63 L45,-56 M63,-73 V-17 L45,0"/>
+  </g>
+  <g id="mug">
+    <path class="obj-fill" d="M-16,-44 V0 a16,5.5 0 0 0 32,0 V-44 z"/>
+    <ellipse class="obj-top" cx="0" cy="-44" rx="16" ry="5.5"/>
+    <path class="obj-line" d="M-16,-44 V0 a16,5.5 0 0 0 32,0 V-44 M16,-34 a10,10 0 0 1 0,20"/>
+    <ellipse class="obj-line" cx="0" cy="-44" rx="16" ry="5.5"/>
+  </g>
+  <g id="table">
+    <path class="table-edge" d="M40,252 H600 V276 H40 z"/>
+    <path class="table-top" d="M96,222 H544 L600,252 H40 z"/>
+    <path d="M96,222 H544 L600,252 H40 z" fill="none" stroke="#24354b" stroke-width="1.5"/>
+  </g>
+  <g id="scene">
+    <use href="#table"/>
+    <use href="#can" x="196" y="240"/>
+    <use href="#box" x="330" y="244"/>
+    <use href="#mug" x="472" y="242"/>
+  </g>
+</defs></svg>
+
+<header>
+  <div class="wrap bar">
+    <span class="brand">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="6" y="13" width="12" height="12" fill="none" stroke="#22d3ee" stroke-width="2"/>
+        <ellipse cx="23" cy="11" rx="4" ry="1.8" fill="none" stroke="#3ddc84" stroke-width="2"/>
+        <path d="M19 11v9a4 1.8 0 0 0 8 0v-9" fill="none" stroke="#3ddc84" stroke-width="2"/>
+      </svg>
+      Kitbash
+    </span>
+    <a href="https://github.com/michaelmazilu/cut-once">GitHub →</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <p class="eyebrow">Hack the North 2026</p>
+    <h1>The whole world<br>is your kit.</h1>
+    <p class="lead">Put on a Meta Quest 3 and the everyday objects in front of you become holograms you can build with. Ask <strong>Kit</strong> what to build, and it designs something out of exactly what's on your table, then walks you through making it.</p>
+    <p class="hint">Here is exactly how that works ↓</p>
+  </section>
+
+  <ol class="steps">
+
+    <li class="step">
+      <div class="copy">
+        <span class="n">1</span>
+        <h2>It takes one photo</h2>
+        <p>You look at the table and ask Kit what you can build. The headset takes a single photo through its passthrough camera. That one photo is the only picture anything in Kitbash ever sees.</p>
+        <ul class="facts"><li>1 photo</li><li>1280 × 960</li><li>the headset's own camera</li></ul>
+      </div>
+      <div class="art">
+        <svg viewBox="0 0 640 330" role="img" aria-label="A headset camera photographs a table with a can, a box and a mug.">
+          <use href="#scene"/>
+          <g class="anim fade">
+            <rect x="34" y="18" width="572" height="286" fill="none" stroke="#22d3ee" stroke-opacity=".25" stroke-width="1.5" rx="6"/>
+            <path d="M34 54V24h30M606 54V24h-30M34 268v30h30M606 268v30h-30" fill="none" stroke="#67e8f9" stroke-width="2.5"/>
+            <g transform="translate(320,44)">
+              <rect x="-30" y="-16" width="60" height="30" rx="8" fill="#0d1524" stroke="#40536b" stroke-width="1.5"/>
+              <circle cx="0" cy="-1" r="8" fill="none" stroke="#67e8f9" stroke-width="2"/>
+              <circle cx="0" cy="-1" r="3" fill="#67e8f9"/>
+            </g>
+            <text class="cap" x="320" y="82" text-anchor="middle">passthrough camera</text>
+          </g>
+          <rect class="anim flash flashit" x="34" y="18" width="572" height="286" rx="6" opacity="0"/>
+        </svg>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="copy">
+        <span class="n">2</span>
+        <h2>It fires 12,288 depth rays through that photo</h2>
+        <p>A grid of rays goes out through the photo's pixels into the headset's live depth map. Every ray that lands comes back as a point in the room. Because each ray goes through a pixel, every point knows exactly where it sits in the picture.</p>
+        <ul class="facts"><li>128 × 96 rays</li><li>1,024 per frame, so nothing stutters</li><li>Meta's depth, no extra sensor</li></ul>
+      </div>
+      <div class="art">
+        <svg viewBox="0 0 640 330" role="img" aria-label="A grid of depth rays sweeps down from the headset and lands as points on the table and objects.">
+          <use href="#scene"/>
+          <g id="rays" class="anim"></g>
+          <g id="hits" class="anim"></g>
+          <g class="anim fade">
+            <circle cx="320" cy="40" r="5" fill="#67e8f9"/>
+            <text class="cap" x="320" y="26" text-anchor="middle">12,288 rays</text>
+          </g>
+        </svg>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="copy">
+        <span class="n">3</span>
+        <h2>Points become objects with real sizes</h2>
+        <p>Points that face up and share a height are the table. Points above it that sit side by side in the grid are one object. Each object is fitted as a box or an upright cylinder, which gives its position and its size in centimetres. That is its digital twin.</p>
+        <ul class="facts"><li>a surface: 60 points, 45 cm across</li><li>an object: 8 points, 1.5 cm tall</li><li>no AI in this step</li></ul>
+      </div>
+      <div class="art">
+        <svg viewBox="0 0 640 330" role="img" aria-label="The points group into three objects, each wrapped in a cyan box or cylinder.">
+          <use href="#scene"/>
+          <g class="anim fade">
+            <path d="M96,222 H544 L600,252 H40 z" fill="#22d3ee" fill-opacity=".07" stroke="#22d3ee" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="6 5"/>
+            <text class="cap" x="320" y="268" text-anchor="middle">surface · 1 of 1</text>
+          </g>
+          <g class="anim">
+            <g transform="translate(196,240)">
+              <ellipse class="ghost-edge draw" cx="0" cy="-80" rx="24" ry="8" style="--len:160" stroke-dasharray="160"/>
+              <path class="ghost-edge draw" d="M-24,-80 V0 a24,8 0 0 0 48,0 V-80" style="--len:230;animation-delay:.1s" stroke-dasharray="230"/>
+              <path class="ghost-fill" d="M-24,-80 V0 a24,8 0 0 0 48,0 V-80 z"/>
+            </g>
+            <g transform="translate(330,244)">
+              <path class="ghost-edge draw" d="M-45,0 V-56 H45 V0 z M-45,-56 L-27,-73 H63 L45,-56 M63,-73 V-17 L45,0" style="--len:520;animation-delay:.25s" stroke-dasharray="520"/>
+              <path class="ghost-fill" d="M-45,-56 H45 V0 H-45 z"/>
+            </g>
+            <g transform="translate(472,242)">
+              <ellipse class="ghost-edge draw" cx="0" cy="-44" rx="16" ry="5.5" style="--len:110;animation-delay:.4s" stroke-dasharray="110"/>
+              <path class="ghost-edge draw" d="M-16,-44 V0 a16,5.5 0 0 0 32,0 V-44" style="--len:150;animation-delay:.4s" stroke-dasharray="150"/>
+              <path class="ghost-fill" d="M-16,-44 V0 a16,5.5 0 0 0 32,0 V-44 z"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="copy">
+        <span class="n">4</span>
+        <h2>Kit names everything it sees</h2>
+        <p>Kit gets the photo with a numbered marker on each object, along with every measured size. In a single look it names them, says which ones are round, splits two things the depth merged into one, and adds anything the depth missed. Known items snap to their exact size, so a tall can is 6.6 by 15.7 centimetres.</p>
+        <ul class="facts"><li>one call</li><li>up to 24 objects</li><li>Qwen3.5-Omni or OpenAI</li></ul>
+      </div>
+      <div class="art">
+        <svg viewBox="0 0 640 330" role="img" aria-label="Each object gets a numbered marker and a label with its name and measured size.">
+          <use href="#scene"/>
+          <g class="anim">
+            <g transform="translate(196,240)"><path class="ghost-edge" d="M-24,-80 V0 a24,8 0 0 0 48,0 V-80" opacity=".6"/></g>
+            <g transform="translate(330,244)"><path class="ghost-edge" d="M-45,0 V-56 H45 V0 z M-45,-56 L-27,-73 H63 L45,-56 M63,-73 V-17 L45,0" opacity=".6"/></g>
+            <g transform="translate(472,242)"><path class="ghost-edge" d="M-16,-44 V0 a16,5.5 0 0 0 32,0 V-44" opacity=".6"/></g>
+
+            <g class="pop" style="animation-delay:.1s">
+              <circle cx="196" cy="140" r="11" fill="#22d3ee"/><text class="tag" x="196" y="144" text-anchor="middle">1</text>
+              <g transform="translate(120,104)"><rect class="tagbox" width="152" height="24" rx="6"/><text class="tag" x="10" y="16">tall can · 6.6×15.7</text></g>
+            </g>
+            <g class="pop" style="animation-delay:.35s">
+              <circle cx="345" cy="176" r="11" fill="#22d3ee"/><text class="tag" x="345" y="180" text-anchor="middle">2</text>
+              <g transform="translate(300,132)"><rect class="tagbox" width="176" height="24" rx="6"/><text class="tag" x="10" y="16">cardboard box · 20×14×9</text></g>
+            </g>
+            <g class="pop" style="animation-delay:.6s">
+              <circle cx="472" cy="212" r="11" fill="#22d3ee"/><text class="tag" x="472" y="216" text-anchor="middle">3</text>
+              <g transform="translate(452,168)"><rect class="tagbox" width="112" height="24" rx="6"/><text class="tag" x="10" y="16">mug · 9×10</text></g>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="copy">
+        <span class="n">5</span>
+        <h2>Kit designs with exactly what you have</h2>
+        <p>Ask for something and Kit designs it out of those objects. Nothing is imagined: every piece in a design is a thing on your table. Before you ever see it, each piece is placed flat on what holds it, and a balance check makes sure the weight lands inside its support. Designs that would topple never reach you.</p>
+        <ul class="facts"><li>pieces meet within 2 mm</li><li>cans stay upright</li><li>the weight must land on its support</li></ul>
+      </div>
+      <div class="art">
+        <svg viewBox="0 0 640 330" role="img" aria-label="Three designs are offered, one is chosen, and its balance is checked.">
+          <use href="#table"/>
+          <g class="anim fade">
+            <g transform="translate(66,40)">
+              <rect width="150" height="96" rx="10" fill="#0d1524" stroke="#24354b"/>
+              <g transform="translate(75,78) scale(.42)"><use href="#can"/><use href="#box" y="-80" x="-9"/></g>
+              <text class="cap" x="12" y="20">birdhouse</text>
+            </g>
+            <g transform="translate(245,34)">
+              <rect width="150" height="104" rx="10" fill="#0e1a2b" stroke="#67e8f9" stroke-width="2"/>
+              <g transform="translate(75,84) scale(.42)"><use href="#box"/><use href="#can" y="-56" x="9"/><use href="#mug" y="-136" x="9"/></g>
+              <text class="cap" x="12" y="20" fill="#67e8f9">tower · picked</text>
+            </g>
+            <g transform="translate(424,40)">
+              <rect width="150" height="96" rx="10" fill="#0d1524" stroke="#24354b"/>
+              <g transform="translate(75,78) scale(.42)"><use href="#mug"/><use href="#box" y="-44" x="-9"/></g>
+              <text class="cap" x="12" y="20">phone stand</text>
+            </g>
+          </g>
+          <g class="anim">
+            <g transform="translate(320,244)">
+              <g class="pop" style="animation-delay:.3s"><use href="#box"/></g>
+              <g class="pop" style="animation-delay:.55s"><use href="#can" y="-56" x="9"/></g>
+              <g class="pop" style="animation-delay:.8s"><use href="#mug" y="-136" x="9"/></g>
+              <g class="fade" style="animation-delay:1s">
+                <line x1="9" y1="-190" x2="9" y2="4" stroke="#3ddc84" stroke-width="1.5" stroke-dasharray="5 4"/>
+                <path d="M-45,2 H45" stroke="#3ddc84" stroke-width="3"/>
+                <circle cx="9" cy="2" r="5" fill="#3ddc84"/>
+                <text class="cap" x="60" y="-96" fill="#3ddc84">balanced ✓</text>
+              </g>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="copy">
+        <span class="n">6</span>
+        <h2>You build it, Kit talks you through it</h2>
+        <p>The holograms lift off your real objects and fly into the shape of the design. One piece glows at a time while Kit reads the step out loud, so your hands stay free. You build by putting the real object inside its hologram. Say done, and the next piece lights up.</p>
+        <ul class="facts"><li>one step at a time</li><li>spoken in an ElevenLabs voice</li><li>half real, half hologram</li></ul>
+      </div>
+      <div class="art">
+        <svg viewBox="0 0 640 330" role="img" aria-label="A real can slides into its glowing hologram and the hologram turns solid green.">
+          <use href="#table"/>
+          <g class="anim">
+            <g transform="translate(400,244)">
+              <path class="ghost-fill" d="M-45,-56 H45 V0 H-45 z"/>
+              <path class="ghost-edge" d="M-45,0 V-56 H45 V0 z M-45,-56 L-27,-73 H63 L45,-56 M63,-73 V-17 L45,0" opacity=".55"/>
+              <g class="pulse">
+                <path class="built-fill" d="M-36,-136 V-56 a24,8 0 0 0 48,0 V-136 z" transform="translate(27,0)"/>
+                <path class="ghost-edge" d="M-9,-136 V-56 a24,8 0 0 0 48,0 V-136" stroke="#3ddc84"/>
+                <ellipse class="ghost-edge" cx="15" cy="-136" rx="24" ry="8" stroke="#3ddc84"/>
+              </g>
+            </g>
+            <g class="slidein" style="--dx:264px;--dy:-56px;animation-delay:.3s">
+              <use href="#can" x="151" y="240"/>
+            </g>
+            <g class="fade" style="animation-delay:.6s">
+              <g transform="translate(96,52)">
+                <rect width="268" height="46" rx="12" fill="#0d1524" stroke="#3ddc84" stroke-width="1.5"/>
+                <text class="cap" x="18" y="28" fill="#dff7ff">“Stand the can on the box.”</text>
+                <path d="M30,46 l10,16 l10,-16" fill="#0d1524" stroke="#3ddc84" stroke-width="1.5"/>
+              </g>
+              <g transform="translate(392,66)" opacity=".9">
+                <path d="M0,-8 H8 L18,-18 V18 L8,8 H0 z" fill="#3ddc84"/>
+                <path d="M24,-8 a12,12 0 0 1 0,16" fill="none" stroke="#3ddc84" stroke-width="2"/>
+              </g>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </li>
+
+  </ol>
+
+  <section class="block">
+    <h2>What's live, and what isn't</h2>
+    <p class="sub">A demo should say which parts are thinking and which parts are remembering.</p>
+    <div class="cards">
+      <div class="card">
+        <h3><span class="dot live"></span>Live, every time</h3>
+        <p>The scan, the objects it finds, their measured sizes, the names, the balance check and Kit's voice. Ask for something new and Kit designs it there and then.</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot reuse"></span>Remembered</h3>
+        <p>Once Kit has designed for a set of objects, those designs are kept, so asking the same thing again is instant. Move the objects and the design is fitted to where they are now.</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot never"></span>Never staged</h3>
+        <p>Nothing is placed in advance. Kitbash has no idea what is on your table, or where, until it looks.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>What it's made of</h2>
+    <p class="sub">Everything the headset shows is drawn by our own hologram shader, at true size, in the real room.</p>
+    <ul class="chips">
+      <li><b>Meta Quest 3</b> passthrough and depth</li>
+      <li><b>Unity 6</b> with the Meta XR SDK</li>
+      <li><b>Qwen3.5-Omni</b> hears, sees and answers</li>
+      <li><b>OpenAI</b> names objects and designs builds</li>
+      <li><b>ElevenLabs</b> gives Kit its voice</li>
+      <li><b>Node and Fastify</b> on a laptop, no cloud server</li>
+    </ul>
+  </section>
+
+  <!--
+    DEMO VIDEO: drop the recording in as site/demo/kitbash.mp4 and uncomment.
+    <section class="block">
+      <h2>See it run</h2>
+      <p class="sub">Recorded on the headset, start to finish.</p>
+      <video controls playsinline poster="poster.jpg" style="width:100%;border-radius:14px;border:1px solid var(--line)">
+        <source src="kitbash.mp4" type="video/mp4">
+      </video>
+    </section>
+  -->
+
+</main>
+
+<footer>
+  <div class="wrap row">
+    <span>Kitbash — built at Hack the North 2026 by Michael, Rhythm and Henry.</span>
+    <span><a href="https://github.com/michaelmazilu/cut-once">Source on GitHub</a></span>
+  </div>
+</footer>
+
+<script>
+  // Ray grid for step 2: drawn here so the markup stays short.
+  (function rays(){
+    const rayG = document.getElementById("rays"), hitG = document.getElementById("hits");
+    if (!rayG || !hitG) return;
+    const eye = { x: 320, y: 40 };
+    // Where a ray lands: the objects stand above the table, everything else is the table top.
+    const top = (x) => {
+      if (x > 168 && x < 224) return 160;   // can
+      if (x > 285 && x < 393) return 188;   // box
+      if (x > 454 && x < 490) return 198;   // mug
+      return 238;                            // table
+    };
+    const svgns = "http://www.w3.org/2000/svg";
+    let i = 0;
+    for (let col = 0; col < 26; col++) {
+      const x = 60 + col * 20, y = top(x + (col % 2 ? 4 : -4));
+      const line = document.createElementNS(svgns, "line");
+      line.setAttribute("x1", eye.x); line.setAttribute("y1", eye.y);
+      line.setAttribute("x2", x); line.setAttribute("y2", y);
+      line.setAttribute("class", "ray fade");
+      line.style.animationDelay = (col * 0.03) + "s";
+      rayG.appendChild(line);
+      for (let k = 0; k < 3; k++) {
+        const hx = x + (k - 1) * 6, hy = top(hx) + (k - 1) * 3;
+        const dot = document.createElementNS(svgns, "circle");
+        dot.setAttribute("cx", hx); dot.setAttribute("cy", hy); dot.setAttribute("r", 2.1);
+        dot.setAttribute("class", "hit pop");
+        dot.style.animationDelay = (0.25 + (i++) * 0.008) + "s";
+        hitG.appendChild(dot);
+      }
+    }
+  })();
+
+  // Animate each step the first time it comes into view.
+  (function reveal(){
+    const steps = document.querySelectorAll(".step, .block");
+    if (!("IntersectionObserver" in window)) { steps.forEach(s => s.classList.add("in")); return; }
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+    }, { rootMargin: "0px 0px -12% 0px", threshold: 0.15 });
+    steps.forEach(s => io.observe(s));
+  })();
+</script>
+</body>
+</html>
