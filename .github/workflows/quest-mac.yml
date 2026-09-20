@@ -19,16 +19,26 @@ jobs:
     defaults:
       run:
         shell: bash
+        working-directory: quest-build
     steps:
       - uses: actions/checkout@v4
         with:
+          path: quest-build
+          # An unrelated gitlink has no .gitmodules entry. Keep it out of this checkout.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/hole/
           lfs: true
           persist-credentials: false
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: quest-build/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: quest-build/pnpm-lock.yaml
       - name: Check Unity installation
         run: |
           version=$(sed -n 's/^m_EditorVersion: //p' apps/quest/ProjectSettings/ProjectVersion.txt | tr -d '\r')
@@ -56,13 +66,13 @@ jobs:
           name: quest-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
           path: |
-            apps/quest/Logs/cli/
-            apps/quest/Assets/XR/
-            apps/quest/Packages/packages-lock.json
+            quest-build/apps/quest/Logs/cli/
+            quest-build/apps/quest/Assets/XR/
+            quest-build/apps/quest/Packages/packages-lock.json
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: quest-apk-${{ github.sha }}-${{ github.run_attempt }}
-          path: apps/quest/Builds/CutOnce.apk
+          path: quest-build/apps/quest/Builds/CutOnce.apk
           if-no-files-found: error
           retention-days: 7
