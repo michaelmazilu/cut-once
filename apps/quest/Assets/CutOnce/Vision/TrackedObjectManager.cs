@@ -169,6 +169,22 @@ namespace CutOnce.Vision
             o.smoothedWorldSize = o.measuredSize;
         }
 
+        /// <summary>
+        /// Forget the whole room. Everything here is a world-space position, which only means anything while the
+        /// tracking origin has not moved under it; when that assumption breaks, the honest thing is to drop the lot
+        /// and look again, not to keep boxes that describe where objects used to be relative to a vanished origin.
+        /// Returns what was dropped, so visuals can be freed.
+        /// </summary>
+        public List<TrackedObject> Forget(List<TrackedObject> removed = null)
+        {
+            removed ??= new List<TrackedObject>();
+            removed.Clear();
+            removed.AddRange(_objects);
+            _objects.Clear();
+            VisibleCount = 0;
+            return removed;
+        }
+
         /// <summary>Retire anything not seen recently. Returns objects that died this call so visuals can be freed.</summary>
         public List<TrackedObject> Prune(List<TrackedObject> removed = null)
         {

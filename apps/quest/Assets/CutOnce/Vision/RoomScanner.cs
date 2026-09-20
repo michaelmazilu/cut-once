@@ -77,6 +77,45 @@ namespace CutOnce.Vision
             Detector.OnDetections += HandleDetections;
         }
 
+        // ── the headset coming and going ───────────────────────────────────────────────────────────────────────────
+        // A tracked object is a world-space position, and world space only means the same thing while the tracking
+        // origin stays put. Take the headset off, walk somewhere, put it back on, and the origin may have been
+        // recentred under everything that was tracked — so the boxes hang in the air where the objects USED to be
+        // relative to an origin that no longer exists.
+        //
+        // The keep-alive cannot catch this on its own: Time.time does not advance while the app is paused, so after
+        // a five-minute break every object still looks like it was seen 40 ms ago and Prune keeps all of it.
+        //
+        // So: when the headset is taken off, or tracking is re-acquired, forget the room. Everything is re-detected
+        // and re-measured within a second, which is cheaper and more honest than trying to correct stale positions.
+        // (The BUILD does not need this — it hangs off an OVRSpatialAnchor, which the system re-localises itself.)
+
+        private void OnEnable()
+        {
+            OVRManager.HMDUnmounted += ForgetTheRoom;
+            OVRManager.TrackingAcquired += ForgetTheRoom;
+        }
+
+        private void OnDisable()
+        {
+            OVRManager.HMDUnmounted -= ForgetTheRoom;
+            OVRManager.TrackingAcquired -= ForgetTheRoom;
+        }
+
+        /// <summary>The Editor and the simulator never raise the HMD events; a pause is the same story there.</summary>
+        private void OnApplicationPause(bool paused)
+        {
+            if (!paused) ForgetTheRoom();
+        }
+
+        private void ForgetTheRoom()
+        {
+            if (Tracker == null) return;
+            var dropped = Tracker.Forget(_removed);
+            if (Visualizer != null) foreach (var o in dropped) Visualizer.Release(o);
+            if (dropped.Count > 0) Debug.Log($"[Vision] the headset moved: forgetting {dropped.Count} tracked object(s) and looking again.");
+        }
+
         private IEnumerator Start()
         {
             _status = "waiting for camera";

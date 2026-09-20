@@ -289,7 +289,21 @@ namespace CutOnce.Device
             var text = step == null ? "That's the whole build. Nice work!" : step.instruction;
             if (string.IsNullOrEmpty(text)) return;
             _hud.ShowAnswer(text);
-            Run(Say(text.Length > MaxSpokenCharacters ? text.Substring(0, MaxSpokenCharacters) : text));
+            Run(Say(Speakable(text, MaxSpokenCharacters)));
+        }
+
+        /// <summary>
+        /// Trims to something that can be SAID: the last sentence that fits, or failing that the last whole word.
+        /// A bare Substring stops mid-word, which is heard as the voice being cut off rather than as an instruction
+        /// that ran long.
+        /// </summary>
+        internal static string Speakable(string text, int max)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length <= max) return text;
+            var end = text.LastIndexOfAny(new[] { '.', '!', '?' }, max - 1);
+            if (end >= max / 2) return text.Substring(0, end + 1);
+            var word = text.LastIndexOf(' ', max - 1);
+            return word > 0 ? text.Substring(0, word).TrimEnd() : text.Substring(0, max);
         }
 
         async Task Say(string text)

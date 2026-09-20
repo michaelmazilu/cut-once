@@ -69,6 +69,7 @@ namespace CutOnce.Copilot
         public void AskScripted(string scriptedQueryId)
         {
             if (IsListening || IsThinking || _host == null) return;
+            if (speaker != null) speaker.Stop();          // a button is a new question too: stop answering the old one
             // A HUD button is its own press: take the frame and the selection now, never a previous question's.
             StartCoroutine(Send(null, scriptedQueryId, CaptureNow(), Selection.Of(_host)));
         }
@@ -78,6 +79,10 @@ namespace CutOnce.Copilot
         private void BeginListening()
         {
             if (IsListening || IsThinking) return;
+            // Silence first, and BEFORE the microphone opens. Pressing A while Kit is talking used to leave him
+            // talking — over the question, and INTO it: the mic hears the headset's own speaker, so his sentence
+            // went to the transcriber along with yours. Interrupting is the whole point of pressing A again.
+            if (speaker != null) speaker.Stop();
             // Frozen on press: the answer must be about what they were looking at when they asked.
             _pressFrame = CaptureNow();
             _pressSelection = Selection.Of(_host);
