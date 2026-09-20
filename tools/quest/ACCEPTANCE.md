@@ -21,6 +21,14 @@ is queued. The preceding candidate run `35501459393` lost communication with the
 Mac runner during setup; it did not complete Unity tests. These new changes are
 not included in the last verified APK above, and their Mac gates remain pending.
 
+The subsequent scanner-lifetime fix keeps the automatic loop and submitted
+inference alive through scanner/parent disable, draining before worker reuse or
+retirement. Nine pure scheduler tests pass locally in .NET. Unity compilation and
+recorded-photo execution are pending; seven new explicit PlayMode host tests and
+the opt-in native source-teardown stress probe have not run. The existing normal
+build does not automatically run that new PlayMode namespace. Neither authored
+tests nor code review establish successful native camera teardown on Quest.
+
 | Requirement | Existing implementation / evidence | Remaining acceptance |
 | --- | --- | --- |
 | Identifies the object | Actual YOLO inference, 80 COCO class names; shipping FP32 weights pass the unchanged bottle/table photo tests | Test representative objects through the Quest camera. No claim to recognize every possible category. |

@@ -31,6 +31,7 @@ namespace CutOnce.Vision
         public CameraSnapshotStatus Status => _state.Status;
         public CameraSnapshotRejection LastRejection => _state.LastRejection;
         public string LastError { get; private set; } = "";
+        public bool LastReadbackHadError { get; private set; }
 
         public bool TryBegin(Texture source, CameraCaptureStamp stamp)
         {
@@ -45,6 +46,7 @@ namespace CutOnce.Vision
             if (!_state.TryBegin(stamp)) { LastError = "Camera snapshot metadata is invalid."; return false; }
             _sourceFormat = format;
             LastError = "";
+            LastReadbackHadError = false;
             try
             {
                 // No destination-format argument: retain the source's actual encoded bytes.
@@ -73,7 +75,8 @@ namespace CutOnce.Vision
                     LastError = "Camera snapshot readback stalled beyond 8 seconds; invalid frame is being drained before reuse.";
                 return Status;
             }
-            if (!_state.Complete(!_request.hasError, now, currentGeneration, maximumAgeSeconds))
+            LastReadbackHadError = _request.hasError;
+            if (!_state.Complete(!LastReadbackHadError, now, currentGeneration, maximumAgeSeconds))
             {
                 UpdatePolicyError();
                 return Status;

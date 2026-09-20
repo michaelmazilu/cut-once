@@ -1,0 +1,8 @@
+{
+  "name": "CutOnce.Vision.PlayTests",
+  "references": ["CutOnce.Vision", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "autoReferenced": false
+}

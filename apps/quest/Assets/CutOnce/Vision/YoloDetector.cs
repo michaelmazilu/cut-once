@@ -133,6 +133,11 @@ namespace CutOnce.Vision
         private float _lastInferenceStartedAt = -999f;
         private readonly PublicationCadence _publicationCadence = new PublicationCadence();
         private RawClassSummary[] _rawClassSummaries = Array.Empty<RawClassSummary>();
+        private VisionInferenceOperation _automaticOperation, _activeOperation, _retirementOperation;
+        private bool _destroyRequested, _resourcesDisposed, _backendScheduled, _applicationQuitting, _backendCompletionUnknown;
+        private VisionCamera _snapshotAwaitingDrain;
+        private Tensor _drainBoxes, _drainClasses, _drainScores;
+        private bool _drainRequested;
 
         private void Awake()
         {
@@ -172,21 +177,45 @@ namespace CutOnce.Vision
             }
         }
 
-        private IEnumerator Start()
+        private void Start()
         {
+            // Exactly one retained loop. SetActive(false) stops component-owned coroutines, so
+            // neither this loop nor an in-flight inference is hosted on the scanner GameObject.
+            if (_automaticOperation == null)
+                _automaticOperation = VisionInferenceLifetime.Run(AutomaticLoop(), OperationFailed);
+        }
+
+        private IEnumerator AutomaticLoop()
+        {
+            if (_destroyRequested) yield break;
             LoadModel();
 
             while (!ModelLoaded)
             {
+                if (_destroyRequested) yield break;
                 if (!string.IsNullOrEmpty(LastError)) yield break;   // a load failure is terminal, don't spin
                 yield return null;
             }
 
-            while (true)
+            while (!_destroyRequested)
             {
+                // An externally submitted recorded/live call owns its output polling until its
+                // retained body finishes. Do not issue recovery readbacks against that same work.
+                if (_activeOperation != null && !_activeOperation.IsComplete)
+                {
+                    yield return null;
+                    continue;
+                }
+                if (_backendScheduled)
+                {
+                    yield return DrainBackend();
+                    ReleaseDrainedSnapshot();
+                    InferenceRunning = false;
+                    if (_destroyRequested) yield break;
+                }
                 var minInterval = maxInferencesPerSecond > 0f ? 1f / maxInferencesPerSecond : 0f;
-                // Paused, not stopped. Unity does not stop a coroutine when its component is disabled, and Start()
-                // runs once per component, so leaving the loop here would end detection for the rest of the session.
+                // The independent pump survives both component and parent/GameObject disable.
+                // No new operation starts until any interrupted backend operation has drained.
                 if (Paused || _applicationPaused || !isActiveAndEnabled || _camera == null || !_camera.IsReady || !_camera.HasFreshFrame ||
                     Time.time - _lastInferenceStartedAt < minInterval)
                 {
@@ -214,7 +243,7 @@ namespace CutOnce.Vision
                 if (status != CameraSnapshotStatus.Pending && status != CameraSnapshotStatus.Draining) break;
                 yield return null; // Expired/invalidated requests drain; never reuse their slot early.
             }
-            if (camera == null) yield break;
+            if (_destroyRequested || camera == null) yield break;
             if (Paused || _applicationPaused || !isActiveAndEnabled || startedGeneration != _publicationGeneration)
             {
                 camera.InvalidateSnapshots();
@@ -226,7 +255,11 @@ namespace CutOnce.Vision
                 yield return DetectFrame(snapshot.Texture, snapshot.Stamp.Pose,
                     new DetectionFrameTiming(snapshot.Stamp.AcquiredAtRealtimeSeconds), startedGeneration, snapshot.Stamp.Generation);
             }
-            finally { camera.ReleaseSnapshot(); }
+            finally
+            {
+                if (_backendScheduled) _snapshotAwaitingDrain = camera;
+                else camera.ReleaseSnapshot();
+            }
         }
 
         private void ReportCaptureError(string reason)
@@ -248,7 +281,21 @@ namespace CutOnce.Vision
         private IEnumerator DetectFrame(Texture texture, Pose cameraPose, DetectionFrameTiming frameTiming, int startedGeneration,
             int? capturedStreamGeneration = null)
         {
-            if (!ModelLoaded || texture == null || InferenceRunning || Paused || _applicationPaused) yield break;
+            if (_destroyRequested || _resourcesDisposed || _backendScheduled ||
+                (_activeOperation != null && !_activeOperation.IsComplete)) yield break;
+            // The caller is only a waiter. A preview/Editor coroutine stopping or its GameObject
+            // being destroyed cannot abandon the submitted operation and its output tensors.
+            var operation = VisionInferenceLifetime.Run(DetectFrameBody(texture, cameraPose, frameTiming,
+                startedGeneration, capturedStreamGeneration), OperationFailed);
+            _activeOperation = operation;
+            while (!operation.IsComplete) yield return null;
+            if (_activeOperation == operation) _activeOperation = null;
+        }
+
+        private IEnumerator DetectFrameBody(Texture texture, Pose cameraPose, DetectionFrameTiming frameTiming, int startedGeneration,
+            int? capturedStreamGeneration)
+        {
+            if (_destroyRequested || !ModelLoaded || texture == null || InferenceRunning || Paused || _applicationPaused) yield break;
 
             _lastInferenceStartedAt = Time.time;
             var startedAt = Time.realtimeSinceStartup;
@@ -307,7 +354,7 @@ namespace CutOnce.Vision
 
             var publishedAt = Time.realtimeSinceStartupAsDouble;
             LastPublicationRejection = DetectionPublicationGate.Evaluate(frameTiming, publishedAt,
-                maxLiveResultAgeSeconds, startedGeneration, _publicationGeneration, Paused || _applicationPaused);
+                maxLiveResultAgeSeconds, startedGeneration, _publicationGeneration, _destroyRequested || Paused || _applicationPaused);
             if (capturedStreamGeneration.HasValue && (_camera == null || !_camera.IsReady ||
                 _camera.CaptureGeneration != capturedStreamGeneration.Value))
                 LastPublicationRejection = DetectionPublicationRejection.PausedOrSuperseded;
@@ -416,11 +463,19 @@ namespace CutOnce.Vision
                 _sourceSize = new Vector2Int(texture.width, texture.height);
                 var prepared = _letterbox.Prepare(texture, _inputSize);
                 TextureConverter.ToTensor(prepared, _input);
+                _drainRequested = false;
+                _drainBoxes = _drainClasses = _drainScores = null;
+                // Set before Schedule: even a partially failed schedule must not lead to early
+                // worker/input disposal or reuse while its submitted work may still be running.
+                _backendScheduled = true;
                 _worker.Schedule(_input);
                 return true;
             }
             catch (Exception e)
             {
+                // A Schedule exception can leave only prior-submission outputs addressable.
+                // Those outputs cannot prove the partially submitted work has completed.
+                if (_backendScheduled) _backendCompletionUnknown = true;
                 Fail("scheduling inference failed: " + e.Message);
                 return false;
             }
@@ -441,6 +496,8 @@ namespace CutOnce.Vision
             scores.ReadbackRequest();
             while (!ReadbackComplete(boxes) || !ReadbackComplete(classes) || !ReadbackComplete(scores))
                 yield return null;
+
+            _backendScheduled = false; // All worker-owned outputs are now complete, before any clone can throw.
 
             // All backend work is complete before these CPU copies. If a later copy throws, the
             // caller already owns and can dispose every earlier copy rather than leaking them.
@@ -596,11 +653,100 @@ namespace CutOnce.Vision
 
         private void OnDestroy()
         {
-            StopAllCoroutines();                                             // a readback still in flight must not land on a disposed worker
+            _destroyRequested = true;
+            unchecked { ++_publicationGeneration; }
+            _camera?.InvalidateSnapshots();
+            // Engine/process shutdown has no future player updates. Do not invent successful
+            // drainage or force a blocking wait; native process teardown handles pending work.
+            if ((_automaticOperation == null || _automaticOperation.IsComplete) &&
+                (_activeOperation == null || _activeOperation.IsComplete) && !_backendScheduled)
+                DisposeResources();
+            else if (_applicationQuitting && !VisionInferenceLifetime.HasEditorDriver) return;
+            else if (_retirementOperation == null)
+                _retirementOperation = VisionInferenceLifetime.Run(RetireResources(), OperationFailed);
+        }
+
+        private void OnApplicationQuit() => _applicationQuitting = true;
+
+        private IEnumerator RetireResources()
+        {
+            // Check only managed flags/handles after owner destruction: do not read this.enabled,
+            // transform, gameObject or other Unity destroyed-object properties here.
+            while ((_automaticOperation != null && !_automaticOperation.IsComplete) ||
+                (_activeOperation != null && !_activeOperation.IsComplete)) yield return null;
+            if (_backendScheduled) yield return DrainBackend();
+            ReleaseDrainedSnapshot();
+            DisposeResources();
+        }
+
+        private IEnumerator DrainBackend()
+        {
+            while (_backendScheduled)
+            {
+                if (TryDrainBackend()) break;
+                yield return null;
+            }
+        }
+
+        private bool TryDrainBackend()
+        {
+            if (_backendCompletionUnknown)
+            {
+                ReportCaptureError("Inference backend quarantined after partial scheduling failure: current-submission completion is unknown. Worker/input/lease retained until process exit; restart the app to recover.");
+                return false;
+            }
+            try
+            {
+                if (!_drainRequested)
+                {
+                    _drainBoxes = _worker.PeekOutput(0);
+                    _drainClasses = _worker.PeekOutput(1);
+                    _drainScores = _worker.PeekOutput(2);
+                    if (_drainBoxes == null || _drainClasses == null || _drainScores == null)
+                        throw new InvalidOperationException("Cannot establish completion of all scheduled worker outputs.");
+                    _drainBoxes.ReadbackRequest();
+                    _drainClasses.ReadbackRequest();
+                    _drainScores.ReadbackRequest();
+                    _drainRequested = true;
+                }
+                if (!ReadbackComplete(_drainBoxes) || !ReadbackComplete(_drainClasses) || !ReadbackComplete(_drainScores)) return false;
+                _backendScheduled = false;
+                return true;
+            }
+            catch (Exception error)
+            {
+                ReportCaptureError("Inference retirement is waiting for safe backend completion: " + error.Message);
+                return false; // Never reinterpret an unknown completion state as safe reuse/disposal.
+            }
+        }
+
+        private void ReleaseDrainedSnapshot()
+        {
+            // ?. intentionally uses the managed reference even if its VisionCamera was destroyed;
+            // ReleaseSnapshot only touches the owned snapshot helper, not native component state.
+            _snapshotAwaitingDrain?.ReleaseSnapshot();
+            _snapshotAwaitingDrain = null;
+        }
+
+        private void OperationFailed(Exception error)
+        {
+            ReportCaptureError("Retained vision operation failed: " + error.Message);
+            // A fault is not evidence of backend completion; DrainBackend owns that decision.
+            if (!_backendScheduled) InferenceRunning = false;
+        }
+
+        private void DisposeResources()
+        {
+            if (_resourcesDisposed) return;
+            if (_backendScheduled) throw new InvalidOperationException("Cannot dispose an inference backend before drainage.");
+            _resourcesDisposed = true;
             _worker?.Dispose();
             _input?.Dispose();
             _letterbox.Dispose();
-            _camera?.ReleaseSnapshot(); // Also covers a coroutine stopped before its finally block runs.
+            _camera?.ReleaseSnapshot();
+            _worker = null;
+            _input = null;
+            InferenceRunning = false;
         }
     }
 }

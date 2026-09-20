@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using Meta.XR;
 using UnityEngine;
 
@@ -33,7 +34,7 @@ namespace CutOnce.Vision
         private Texture _observedTexture;
         private Vector2Int _observedResolution;
         private DateTime _observedTimestamp, _lastQueuedTimestamp;
-        private bool _wasReady, _applicationPaused;
+        private bool _wasReady, _applicationPaused, _applicationQuitting;
         private string _metadataError = "";
 
         private void Awake()
@@ -155,7 +156,32 @@ namespace CutOnce.Vision
             InvalidateSnapshots();
         }
 
-        private void OnDestroy() => _snapshot.Dispose();
+        private void OnApplicationQuit() => _applicationQuitting = true;
+
+        private void OnDestroy()
+        {
+            InvalidateSnapshots();
+            if ((_snapshot.Status == CameraSnapshotStatus.Pending || _snapshot.Status == CameraSnapshotStatus.Draining) &&
+                (!_applicationQuitting || VisionInferenceLifetime.HasEditorDriver))
+                VisionInferenceLifetime.Run(DrainDestroyedSnapshot(_snapshot, CaptureGeneration));
+            else _snapshot.Dispose();
+        }
+
+        private static IEnumerator DrainDestroyedSnapshot(AsyncCameraSnapshot snapshot, int generation)
+        {
+            // Managed ownership survives this component becoming Unity-null. This cannot prevent
+            // MRUK.OnDisable from destroying its BORROWED source texture; the native behavior is
+            // intentionally covered only by the opt-in GPU teardown/device verification gate.
+            while (snapshot.Status == CameraSnapshotStatus.Pending || snapshot.Status == CameraSnapshotStatus.Draining)
+            {
+                snapshot.Poll(Time.realtimeSinceStartupAsDouble, generation);
+                if (snapshot.Status == CameraSnapshotStatus.Pending || snapshot.Status == CameraSnapshotStatus.Draining)
+                    yield return null;
+            }
+            if (snapshot.LastReadbackHadError)
+                Debug.LogError("[Vision] Camera readback failed while draining a destroyed source owner; native source-retention safety remains unverified.");
+            snapshot.Dispose();
+        }
 
         /// <summary>
         /// Ray through a viewport point, origin BOTTOM-LEFT. Detector boxes are top-left, so callers

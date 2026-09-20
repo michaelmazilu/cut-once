@@ -40,6 +40,24 @@ long numerical-test timeout, not the production freshness limit. Lifecycle tests
 check the real half-second boundary separately. Neither fixture is a physical PCA
 capture: native RGB/pose pairing and readback/upload cost still need Quest tests.
 
+Automatic scanning and submitted inference now run on a small retained-operation
+driver, independent of the scanner GameObject. Disabling a scanner or its parent
+invalidates publication but does not abandon its pending output readbacks or
+release its camera lease. Reactivation resumes the same loop after outstanding
+work drains; destruction retires the worker afterward. Editor photo callers wait
+on that same owned operation, so stopping a preview coroutine does not abandon
+the backend. Partially failed scheduling with unknown completion quarantines the
+worker instead of reusing older output tensors as a false completion signal.
+
+Nine scheduler logic tests pass in an isolated .NET run. The actual Unity
+compile/photo regression for this follow-up is still pending on the Mac runner.
+Seven new PlayMode cases exercise the real driver with a controlled fake backend;
+they are explicit tests, not part of the existing EditMode/`quest:sim` filters.
+The separate opt-in GPU source-teardown probe is also unexecuted. See
+`Assets/CutOnce/Vision/PlayTests/README.md` for their scope and invocation.
+These checks do not establish native PCA texture retention when the SDK destroys
+its borrowed source, or GPU survival across Editor assembly/domain reload.
+
 RoomSense's room-wide glow and guessed gaze labels are suppressed while Vision
 owns recognition. Its MRUK room geometry, anchors and colliders remain active.
 This policy applies to both existing and later-created RoomSense components.
