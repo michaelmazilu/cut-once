@@ -17,7 +17,7 @@ namespace CutOnce.UI
         static readonly Color Panel = new Color(0.04f, 0.07f, 0.10f, 0.78f), Ink = new Color(0.92f, 0.97f, 1f, 1f), Dim = new Color(0.62f, 0.75f, 0.82f, 1f),
             Accent = new Color(0.13f, 0.83f, 0.93f, 1f), Warn = new Color(1f, 0.85f, 0.3f, 1f);
 
-        Text _title, _progress, _stepTitle, _stepBody, _materials, _part, _history, _status, _toast, _answer;
+        Text _title, _progress, _stepTitle, _stepBody, _materials, _part, _history, _status, _toast, _answer, _copilot;
         RectTransform _bar;
         float _toastUntil;
 
@@ -47,6 +47,7 @@ namespace CutOnce.UI
             _part = Label(root, "part", 330, 228, 290, 130, 15, Ink, TextAnchor.UpperLeft);
             _history = Label(root, "history", 20, 362, Width - 40, 50, 12, Dim, TextAnchor.LowerLeft);
             _toast = Label(root, "toast", 20, -44, Width - 40, 36, 20, Warn, TextAnchor.MiddleCenter);
+            _copilot = Label(root, "copilot activity", 20, -82, Width - 40, 36, 22, Accent, TextAnchor.MiddleCenter);
             _answer = Label(root, "answer", 20, Height + 8, Width - 40, 90, 17, Ink, TextAnchor.UpperLeft);
         }
 
@@ -93,9 +94,26 @@ namespace CutOnce.UI
         public void ShowStatus(string connection, string alignment) => _status.text = string.IsNullOrEmpty(alignment) ? connection : $"{connection} · {alignment}";
         public void ShowAnswer(string text) => _answer.text = text ?? "";
 
+        public void ShowCopilotActivity(string activity)
+        {
+            _copilot.text = activity == "listening" ? "LISTENING  -  release A to send"
+                          : activity == "thinking" ? "THINKING..."
+                          : "";
+            _copilot.color = activity == "thinking" ? Warn : Accent;
+        }
+
         public void Toast(string text, float seconds = 3f) { _toast.text = text; _toastUntil = Time.time + seconds; }
 
-        void Update() { if (_toast.text.Length > 0 && Time.time > _toastUntil) _toast.text = ""; }
+        void Update()
+        {
+            if (_toast.text.Length > 0 && Time.time > _toastUntil) _toast.text = "";
+            if (_copilot.text.Length > 0)
+            {
+                var c = _copilot.color;
+                c.a = 0.65f + 0.35f * (0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 7f));
+                _copilot.color = c;
+            }
+        }
 
         /// <summary>Before anything is placed the panel carries the instructions, so it floats in front of the operator, a little below eye level.</summary>
         public void StandInFrontOf(Vector3 head, Vector3 forward)

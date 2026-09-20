@@ -37,6 +37,8 @@ namespace CutOnce.Device
         public bool PiecesInFlight => _flow.Phase == BuildPhase.Assembling;
         public BuildFlow Flow => _flow;
 
+        public void HighlightTwins(string[] twinIds) => _twins?.Highlight(twinIds, 6f);
+
         public void Init(ServerConfig config, ApiClient api, SyncEngine sync, BuildStateStore store, AssemblyView assembly, AlignmentController alignment,
                          IOperatorInput input, ISurfaceRaycaster surface, HudController hud, Material material, HologramPalette palette)
         {

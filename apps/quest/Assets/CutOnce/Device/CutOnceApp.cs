@@ -298,6 +298,11 @@ namespace CutOnce.Device
             _dirty = true;
         }
 
+        public void HighlightTwins(string[] twinIds, string style) => _build?.HighlightTwins(twinIds);
+
+        public void ShowCopilotActivity(CopilotActivity activity) =>
+            _hud.ShowCopilotActivity(activity == CopilotActivity.Listening ? "listening" : activity == CopilotActivity.Thinking ? "thinking" : "idle");
+
         /// <summary>The answer, then the drawing it came from (the "source card": sheet and page).</summary>
         public void ShowAnswer(CopilotResponseDto response)
         {

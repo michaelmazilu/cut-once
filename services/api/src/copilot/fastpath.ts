@@ -21,7 +21,10 @@ export interface FastPath {
  * Lower case, no punctuation, single spaces. "Mark the left rear leg, built." → "mark the left rear leg built".
  * An apostrophe joins its word ("It's done." → "its done"): the transcriber writes them, and the commands below are spelt without.
  */
-export const normalise = (s: string) => s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+export const normalise = (s: string) => s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()
+  // Typed simulator questions occasionally contain this common transposition. Correcting the command word here
+  // keeps the deterministic scan path available instead of spending a model call on an obvious intent.
+  .replace(/\bwaht\b/g, "what");
 
 /** A question never changes the build, whatever the model proposes. "Is the leg in?" asks; "the leg is in" tells. */
 export const isQuestion = (s: string) =>
@@ -54,7 +57,7 @@ export function resolvePart(phrase: string, parts: Part[]): Part | null {
   return best && !tied ? best.part : null;
 }
 
-const PLAIN_ASK = /^(what can (i|we) (build|make)( with (this|these|that|all this|all of this|this stuff))?|what could (i|we) (build|make)( with (this|these|that))?|help me build something|build something|make something)$/;
+const PLAIN_ASK = /^(?:(?:hey )?(?:kit )?)?(?:what (?:can|could|should|do) (?:i|we) (?:build|make)(?: with (?:this|these|that|all this|all of this|this stuff))?|help me build something|build something|make something)$/;
 const ASKING = "(?:hey kit )?(?:kit )?(?:(?:can|could|would|will) you |please )?";
 /**
  * "Build me a birdhouse", "let's make a robot", "can we build a tower with these": the thing asked for, as said.

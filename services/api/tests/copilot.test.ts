@@ -85,6 +85,11 @@ describe("fast path", () => {
   it("'what can I build' starts a scan without the model", () =>
     expect(matchFastPath("What can I build with this?", input())?.action).toEqual({ type: "start_scan" }));
 
+  it("accepts conversational and typoed forms of the plain build question", () => {
+    expect(matchFastPath("Hey, what do I build?", input())?.action).toEqual({ type: "start_scan" });
+    expect(matchFastPath("hey waht do i build", input())?.action).toEqual({ type: "start_scan" });
+  });
+
   it("a plain 'what can I build?' clears the wish; 'scan again' keeps it", () => {
     expect(matchFastPath("What can I build?", input())).toMatchObject({ action: { type: "start_scan" }, wish: null });
     expect(matchFastPath("scan again", input())?.wish).toBeUndefined();

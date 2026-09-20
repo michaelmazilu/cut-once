@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 
 export const ensureDir = (dir: string) => mkdirSync(dir, { recursive: true });
@@ -16,9 +16,16 @@ export const readJson = <T>(path: string): T | null => (existsSync(path) ? (JSON
 /** Append one line and fsync it: an acknowledged event survives a power cut. */
 export function appendLine(path: string, line: string) {
   ensureDir(dirname(path));
-  appendFileSync(path, line + "\n");
-  const fd = openSync(path, "r");
-  try { fsyncSync(fd); } finally { closeSync(fd); }
+  // Flush the same writable handle used for the append. Windows' FlushFileBuffers rejects the read-only handle
+  // used here previously with EPERM, after the bytes had already been appended; that made starting a build fail
+  // halfway through persistence even though the event file existed.
+  const fd = openSync(path, "a");
+  try {
+    writeSync(fd, line + "\n");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export const readLines = (path: string): string[] => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : []);
