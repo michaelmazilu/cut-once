@@ -1,3 +1,4 @@
+using Meta.XR.EnvironmentDepth;
 using UnityEngine;
 
 namespace CutOnce.Vision
@@ -37,6 +38,12 @@ namespace CutOnce.Vision
         [Tooltip("The looked-at object breathes. 0 stops it.")]
         public float focusPulseHz = 1.2f;
 
+        [Header("Surface paint (on device, where live depth exists)")]
+        [Tooltip("Scale-up of the box for painting, so a snug detection never clips the object's silhouette.")]
+        public float surfacePad = 1.2f;
+        [Range(0f, 1f)] public float surfaceAlpha = 0.6f;
+        [Range(0f, 1f)] public float focusSurfaceAlpha = 0.95f;
+
         [Header("Label")]
         public float labelGap = 0.04f;      // metres above the top of the highlight
         public float labelSize = 0.005f;
@@ -56,6 +63,7 @@ namespace CutOnce.Vision
         private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _visuals = new();
         private Transform _camera;
         private Material _material;
+        private Material _surface;      // null = no live depth here; the box look is used instead
         private MaterialPropertyBlock _props;
 
         private static readonly int FillColor = Shader.PropertyToID("_FillColor");
@@ -67,6 +75,7 @@ namespace CutOnce.Vision
         private static readonly int EdgeMode = Shader.PropertyToID("_EdgeMode");
         private static readonly int HalfSize = Shader.PropertyToID("_HalfSize");
         private static readonly int RevealY = Shader.PropertyToID("_RevealY");
+        private static readonly int TintId = Shader.PropertyToID("_Tint");
 
         private void Awake()
         {
@@ -81,6 +90,19 @@ namespace CutOnce.Vision
                 shader = Shader.Find("Universal Render Pipeline/Unlit");
             }
             _material = new Material(shader) { name = "Vision highlight (shared)" };
+
+            // The segmentation look needs the live depth texture, which exists on the headset and not
+            // over Link or in the Editor. Where it exists: one depth manager (reused if the scene has
+            // one), soft mode so silhouette edges feather, and the paint shader instead of box edges.
+            if (EnvironmentDepthManager.IsSupported)
+            {
+                var depth = FindAnyObjectByType<EnvironmentDepthManager>();
+                if (depth == null) depth = gameObject.AddComponent<EnvironmentDepthManager>();
+                depth.OcclusionShadersMode = OcclusionShadersMode.SoftOcclusion;
+                var paint = Resources.Load<Shader>("SurfaceGlow");
+                if (paint != null) _surface = new Material(paint) { name = "Vision surface paint (shared)" };
+                else Debug.LogError("[Vision] SurfaceGlow shader missing from Resources; using the box look.");
+            }
         }
 
         /// <summary>Create or update the visual for a tracked object. Focused = the one under the gaze.</summary>
@@ -97,7 +119,8 @@ namespace CutOnce.Vision
             var follow = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
             t.position = Vector3.Lerp(t.position, o.smoothedWorldPosition, follow);
             var cube = cached.highlight.transform;
-            cube.localScale = Vector3.Lerp(cube.localScale, o.smoothedWorldSize, follow);
+            var targetSize = _surface != null ? o.smoothedWorldSize * surfacePad : o.smoothedWorldSize;
+            cube.localScale = Vector3.Lerp(cube.localScale, targetSize, follow);
 
             if (cached.lastFocused != focused)
             {
@@ -157,6 +180,16 @@ namespace CutOnce.Vision
         private void Style(MeshRenderer renderer, bool focused)
         {
             if (renderer == null) return;
+            if (_surface != null)
+            {
+                // Surface mode: the paint IS the highlight. No edges, no fill, no grid — the object's
+                // own silhouette carries the colour; focus just turns the paint up.
+                var tint = focused ? focusEdgeColour : edgeColour;
+                renderer.GetPropertyBlock(_props);
+                _props.SetColor(TintId, new Color(tint.r, tint.g, tint.b, focused ? focusSurfaceAlpha : surfaceAlpha));
+                renderer.SetPropertyBlock(_props);
+                return;
+            }
             var edge = focused ? focusEdgeColour : edgeColour;
             var fill = focused ? focusFillAlpha : fillAlpha;
             renderer.GetPropertyBlock(_props);
@@ -189,7 +222,7 @@ namespace CutOnce.Vision
             var collider = box.GetComponent<Collider>();
             if (collider != null) { collider.enabled = false; Destroy(collider); }
             var renderer = box.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = _material;
+            renderer.sharedMaterial = _surface != null ? _surface : _material;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
 
@@ -233,6 +266,7 @@ namespace CutOnce.Vision
             foreach (var pair in _visuals) if (pair.Key != null) Destroy(pair.Key);
             _visuals.Clear();
             if (_material != null) Destroy(_material);
+            if (_surface != null) Destroy(_surface);
         }
     }
 }

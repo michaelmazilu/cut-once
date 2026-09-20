@@ -1,6 +1,12 @@
 {
   "name": "CutOnce.Vision",
   "rootNamespace": "CutOnce.Vision",
-  "references": ["meta.xr.mrutilitykit", "Oculus.VR", "Unity.InferenceEngine", "Unity.Collections"],
+  "references": [
+    "meta.xr.mrutilitykit",
+    "Oculus.VR",
+    "Unity.InferenceEngine",
+    "Unity.Collections",
+    "Meta.XR.EnvironmentDepth"
+  ],
   "autoReferenced": true
 }
