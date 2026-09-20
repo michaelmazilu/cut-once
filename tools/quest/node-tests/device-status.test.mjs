@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CAMERA_PERMISSION, PACKAGE, editorVersion, inspectDevice, parseBattery, parseDevices, parseMemory, parsePackage, parseThermal, unityAdbPath } from "../device-status.mjs";
+import { CAMERA_PERMISSION, PACKAGE, classifyAdbFailure, editorVersion, execute, inspectDevice, parseBattery, parseDevices, parseMemory, parsePackage, parseThermal, unityAdbPath } from "../device-status.mjs";
 
 const version = "6000.6.2f1";
 const serial = "DO_NOT_UPLOAD_USB_SERIAL";
@@ -41,6 +41,32 @@ test("uses the pinned Hub ADB without environment or PATH substitutions", () => 
   assert.equal(unityAdbPath(version), "/Applications/Unity/Hub/Editor/6000.6.2f1/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb");
   assert.throws(() => unityAdbPath("../../private"));
   assert.throws(() => editorVersion("m_EditorVersion: /private/version"));
+});
+
+test("the actual spawn boundary fixes loopback port 5037 and clears server/device overrides", () => {
+  const env = {
+    PATH: "/test/tools", HOME: "/private/account", ADB_SERVER_SOCKET: "tcp:remote-host:3737",
+    ANDROID_ADB_SERVER_PORT: "3737", ADB_SERVER_PORT: "3737", ANDROID_SERIAL: serial,
+    ANDROID_ADB_SERVER_ADDRESS: "private-remote-host",
+  };
+  const originalEnvironment = { ...env };
+  const calls = [];
+  const response = { status: 0, stdout: "List of devices attached\n" };
+  const spawn = (...args) => { calls.push(args); return response; };
+  assert.equal(execute(unityAdbPath(version), ["devices", "-l"], { spawn, env }), response);
+  execute(unityAdbPath(version), ["-t", "7", "shell", "getprop", "ro.product.model"], { spawn, env });
+  assert.deepEqual(calls[0][1], ["-P", "5037", "devices", "-l"]);
+  assert.deepEqual(calls[1][1], ["-P", "5037", "-t", "7", "shell", "getprop", "ro.product.model"]);
+  for (const [path, args, options] of calls) {
+    assert.equal(path, unityAdbPath(version));
+    assert.deepEqual(options.env, { PATH: env.PATH, HOME: env.HOME });
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(options.shell, false);
+    assert.equal(options.timeout, 10_000);
+    assert.equal(options.maxBuffer, 2 * 1024 * 1024);
+    assert.ok(!args.includes("-H") && !args.includes("-a") && !args.includes("3737"));
+  }
+  assert.deepEqual(env, originalEnvironment, "The runner's environment must not be mutated");
 });
 
 test("drops serial, USB path, network address and arbitrary model names while parsing", () => {
@@ -151,6 +177,41 @@ test("ADB failures retain safe summaries rather than private stdout/stderr", () 
   assert.ok(!JSON.stringify(report).includes(serial));
   assert.ok(!JSON.stringify(report).includes("10.0.0.7"));
   assert.equal(report.issues.length, 1);
+  assert.deepEqual(report.failures, [{ check: "USB device list", code: "command-failed" }]);
+});
+
+test("daemon and permission failures retain only allowlisted diagnostic codes", () => {
+  const cases = [
+    [{ error: { code: "ETIMEDOUT", message: serial } }, "command-timeout"],
+    [{ error: { code: "EACCES", path: "/private/account/adb" } }, "executable-permission-denied"],
+    [{ error: { code: "EPERM", message: serial } }, "executable-permission-denied"],
+    [{ error: { code: "ENOENT", message: serial } }, "executable-not-found"],
+    [{ error: { code: "ENOBUFS", message: serial } }, "command-output-limit"],
+    [{ stderr: "* cannot start server on remote host" }, "remote-daemon-autostart-refused"],
+    [{ stderr: "error: no permissions; private USB serial" }, "usb-permission-denied"],
+    [{ stderr: "cannot bind listener: Operation not permitted" }, "command-permission-denied"],
+    [{ stderr: "adb: Permission denied /private/account" }, "command-permission-denied"],
+    [{ stderr: "* failed to start daemon\nadb: cannot connect to daemon" }, "local-daemon-start-failed"],
+    [{ stderr: "cannot connect to server: Connection refused" }, "local-daemon-unreachable"],
+    [{ error: { code: serial }, stderr: "private unrecognized failure" }, "command-failed"],
+  ];
+  for (const [failure, code] of cases) {
+    const result = { status: 1, stdout: serial, ...failure };
+    assert.equal(classifyAdbFailure(result), code);
+    const report = probe(mocked({ "devices -l": result }));
+    assert.equal(report.status, "adb-unavailable");
+    assert.deepEqual(report.failures, [{ check: "USB device list", code }]);
+    const output = JSON.stringify(report);
+    for (const secret of [serial, "/private/account", "private USB serial", "private unrecognized failure"])
+      assert.ok(!output.includes(secret), `Report leaked ${secret}`);
+  }
+});
+
+test("thrown spawn errors are classified without retaining their private message", () => {
+  const report = probe({ run: () => { throw Object.assign(new Error(serial), { code: "EACCES" }); } });
+  assert.equal(report.status, "adb-unavailable");
+  assert.deepEqual(report.failures, [{ check: "USB device list", code: "executable-permission-denied" }]);
+  assert.ok(!JSON.stringify(report).includes(serial));
 });
 
 test("host and missing Unity Android module checks run before ADB", () => {

@@ -93,15 +93,34 @@ export function parseMemory(text) {
   return { totalPssKiB: number(/\bTOTAL PSS:\s*(\d+)/), totalRssKiB: number(/\bTOTAL RSS:\s*(\d+)/) };
 }
 
-function execute(adb, args) {
-  const environment = { ...process.env };
+export function execute(adb, args, { spawn = spawnSync, env = process.env } = {}) {
+  const environment = { ...env };
   // Never inherit a remote/custom ADB server or implicit device selection from a runner account.
   for (const key of ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_PORT", "ADB_SERVER_PORT", "ANDROID_SERIAL", "ANDROID_ADB_SERVER_ADDRESS"])
     delete environment[key];
-  return spawnSync(adb, ["-H", "127.0.0.1", "-P", "5037", ...args], {
+  // ADB recognizes its default empty host as loopback. Some bundled versions classify
+  // literal 127.0.0.1 as remote and refuse to start a missing daemon. No -a: loopback only.
+  return spawn(adb, ["-P", "5037", ...args], {
     encoding: "utf8", timeout: 10_000, maxBuffer: 2 * 1024 * 1024,
-    env: environment, stdio: ["ignore", "pipe", "pipe"],
+    env: environment, stdio: ["ignore", "pipe", "pipe"], shell: false,
   });
+}
+
+/** Only fixed categories escape this function; raw errors may contain account/device data. */
+export function classifyAdbFailure(result) {
+  switch (result?.error?.code) {
+    case "ETIMEDOUT": return "command-timeout";
+    case "EACCES": case "EPERM": return "executable-permission-denied";
+    case "ENOENT": return "executable-not-found";
+    case "ENOBUFS": return "command-output-limit";
+  }
+  const output = `${result?.stderr ?? ""}\n${result?.stdout ?? ""}`;
+  if (/cannot start server on remote host/i.test(output)) return "remote-daemon-autostart-refused";
+  if (/no permissions(?:\b|;)/i.test(output)) return "usb-permission-denied";
+  if (/permission denied|operation not permitted/i.test(output)) return "command-permission-denied";
+  if (/(?:failed to|cannot) start (?:the )?daemon/i.test(output)) return "local-daemon-start-failed";
+  if (/(?:cannot|failed to) connect to (?:the )?(?:daemon|server)|connection refused/i.test(output)) return "local-daemon-unreachable";
+  return "command-failed";
 }
 
 /** The injected runner makes every permitted ADB request testable without touching hardware. */
@@ -112,7 +131,7 @@ export function inspectDevice({ version, os = process.platform, exists = existsS
     unityVersion: version,
     adbSource: "The pinned Unity Hub editor's bundled Android SDK",
     status: "unavailable", message: "", connection: null, device: null, app: null, health: null,
-    issues: [],
+    issues: [], failures: [],
   };
   const stop = (status, message) => Object.assign(report, { status, message });
   if (os !== "darwin") return stop("unsupported-host", "This probe is intended for the registered Mac runner.");
@@ -121,8 +140,9 @@ export function inspectDevice({ version, os = process.platform, exists = existsS
   const query = (args, name, allowMissing = false) => {
     let result;
     try { result = run(adb, args); }
-    catch { result = { status: null }; }
+    catch (error) { result = { status: null, error }; }
     if (!result.error && (result.status === 0 || (allowMissing && result.status === 1))) return result;
+    report.failures.push({ check: name, code: classifyAdbFailure(result) });
     report.issues.push(`${name} could not be read; raw command output was not retained.`);
     return null;
   };
