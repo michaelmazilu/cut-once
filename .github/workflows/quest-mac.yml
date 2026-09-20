@@ -39,7 +39,7 @@ jobs:
           git -c credential.helper= lfs pull
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: ${{ env.QUEST_BUILD_ROOT }}/package.json
+          package_json_file: quest-build-${{ github.run_id }}-${{ github.run_attempt }}/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
