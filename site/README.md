@@ -7,21 +7,24 @@ and SVG: no build step, no API calls, no login. It cannot reach the Director, th
 - `index.html` — sends anyone who lands on the bare domain to `/demo`
 - `vercel.json` — the redirect, clean URLs and two safety headers
 
-## Deploy
+## Live at https://kitdemo.vercel.app
 
-On vercel.com: **Add New → Project**, import `michaelmazilu/cut-once`, then set
+`kitbash.vercel.app` was already taken by someone else's project, so the address is
+**kitdemo.vercel.app**. The bare address redirects to `/demo`.
 
-| Setting | Value |
-|---|---|
-| Framework Preset | Other |
-| Root Directory | `site` |
-| Build Command | leave empty |
-| Output Directory | leave empty |
+It is deployed straight from this folder with the Vercel CLI, as the project `kitbash` under the
+account `michaelmazilu08-2683`. It is **not** connected to GitHub, so pushing does not redeploy it.
+After changing anything here:
 
-Deploy, then rename the project to `kitbash` under Settings → General so the address is
-`kitbash.vercel.app`. Every push to `main` redeploys it.
+```bash
+cd site && npx vercel --prod
+```
 
-With the Vercel CLI instead: `cd site && npx vercel --prod`.
+Every production deploy is aliased to kitdemo.vercel.app on its own, because that domain belongs to
+the project. To make pushes deploy it instead, open the `kitbash` project on vercel.com, then
+Settings → Git, connect `michaelmazilu/cut-once` and set the Root Directory to `site`.
+
+The CLI leaves `.vercel/` and `.env.local` in this folder; `.gitignore` here keeps both out of git.
 
 ## Look at it locally
 
