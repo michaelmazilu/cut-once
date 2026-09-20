@@ -40,7 +40,7 @@ namespace CutOnce.Vision
         public float readbackTimeoutSeconds = 8f;
 
         [Tooltip("Upper bound on inference rate. The model takes as long as it takes; this only stops us queueing faster than that. A few a second keep the labels live without cooking an XR2.")]
-        public float maxInferencesPerSecond = 3f;
+        public float maxInferencesPerSecond = 8f;
 
         [Tooltip("Only for a model whose head already gives corners (x1,y1,x2,y2). YOLO gives centre+size.")]
         public bool cornerBoxes;

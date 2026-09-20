@@ -12,6 +12,8 @@ namespace CutOnce.Vision
         public float confidence;
         public Vector3 worldPosition;          // newest raw measurement
         public Vector3 smoothedWorldPosition;  // what the visuals follow
+        public Vector3 worldSize;              // how big it looked, in metres
+        public Vector3 smoothedWorldSize;      // what the glow is drawn at
         public float lastSeenTime;
         public int consecutiveHits;
         public int totalHits;
@@ -41,7 +43,7 @@ namespace CutOnce.Vision
         public float associationMaxDistance = 0.75f;
 
         [Tooltip("Detections needed before an object becomes visible. Suppresses one-frame false positives.")]
-        public int hitsBeforeVisible = 3;
+        public int hitsBeforeVisible = 2;
 
         [Tooltip("How long an object survives without being re-detected.")]
         public float keepAliveSeconds = 1.5f;
@@ -59,7 +61,9 @@ namespace CutOnce.Vision
         private int _nextId = 1;
 
         /// <summary>Fold one located detection into the tracked set.</summary>
-        public TrackedObject Observe(in DetectedObject detection, Vector3 world)
+        public TrackedObject Observe(in DetectedObject detection, Vector3 world) => Observe(detection, world, Vector3.zero);
+
+        public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize)
         {
             var now = Time.time;
             var match = FindNearest(detection.classId, world);
@@ -73,6 +77,8 @@ namespace CutOnce.Vision
                     className = detection.className,
                     worldPosition = world,
                     smoothedWorldPosition = world,
+                    worldSize = worldSize,
+                    smoothedWorldSize = worldSize,
                 };
                 _objects.Add(match);
             }
@@ -86,6 +92,11 @@ namespace CutOnce.Vision
                     match.smoothedWorldPosition = Vector3.Lerp(match.smoothedWorldPosition, world, positionSmoothing);
             }
 
+            if (worldSize != Vector3.zero)
+            {
+                match.worldSize = worldSize;
+                match.smoothedWorldSize = match.smoothedWorldSize == Vector3.zero ? worldSize : Vector3.Lerp(match.smoothedWorldSize, worldSize, positionSmoothing);
+            }
             match.className = detection.className;
             match.confidence = Mathf.Max(match.confidence * 0.9f, detection.confidence);
             match.lastSeenTime = now;

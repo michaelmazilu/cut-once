@@ -21,7 +21,7 @@ namespace CutOnce.Vision
 
         [Header("Behaviour")]
         [Tooltip("Ignore detections below this. The model's own score threshold is separate and lower.")]
-        [Range(0f, 1f)] public float minConfidence = 0.4f;
+        [Range(0f, 1f)] public float minConfidence = 0.3f;
         public bool logDetections = true;
         public float logInterval = 1f;
 
@@ -97,10 +97,10 @@ namespace CutOnce.Vision
             foreach (var d in detections)
             {
                 if (d.confidence < minConfidence) continue;
-                if (!Locator.TryLocate(d, cameraPose, out var world)) continue;
+                if (!Locator.TryLocate(d, cameraPose, out var world, out var worldSize)) continue;
 
                 located++;
-                var tracked = Tracker.Observe(d, world);
+                var tracked = Tracker.Observe(d, world, worldSize);
                 _observed.Add(tracked.id);
 
                 if (shouldLog) Debug.Log($"Detected: {d.className} {d.confidence:0.00}  @ {world}");
@@ -161,9 +161,12 @@ namespace CutOnce.Vision
                 }
             }
             _focused = focus;
+            // Everything the model can see glows, not only what you happen to face: the room being alive is the point.
+            // Looking at one thing still picks it out — the visualiser reads Focused for that.
+            Visualizer.Focused = focus;
             foreach (var o in Tracker.Objects)
             {
-                if (o == focus) Visualizer.Show(o);
+                if (o.visible) Visualizer.Show(o);
                 else Visualizer.Hide(o);
             }
         }

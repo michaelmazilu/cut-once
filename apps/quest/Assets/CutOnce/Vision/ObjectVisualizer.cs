@@ -17,7 +17,11 @@ namespace CutOnce.Vision
     {
         public Material glowMaterial;
         public Color highlightColour = new Color(0.25f, 0.75f, 1f, 0.55f);
+        [Tooltip("Only for an object whose size could not be measured: everything else is drawn at the size its detection box works out to.")]
         public Vector3 defaultSize = new Vector3(0.28f, 0.28f, 0.28f);
+
+        /// <summary>The one being looked at, drawn a little stronger so a roomful of glows still has a subject.</summary>
+        public TrackedObject Focused { get; set; }
         public float labelHeight = 0.08f;
         public float labelSize = 0.0035f;
         public bool showConfidence;
@@ -26,9 +30,10 @@ namespace CutOnce.Vision
         [Tooltip("How fast visuals catch up to the tracked position, in metres/second of lerp.")]
         public float followSpeed = 8f;
 
-        private class Cached { public Transform transform; public TextMesh text, shadow; public string lastName; }
+        private class Cached { public Transform transform, box; public MeshRenderer glow; public TextMesh text, shadow; public string lastName; public bool wasFocused = true; }
         private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _labels = new();
         private Transform _camera;
+        private MaterialPropertyBlock _props;
 
         private static readonly int TintId = Shader.PropertyToID("_Tint");
         private static readonly int PulseRadiusId = Shader.PropertyToID("_PulseRadius");
@@ -57,9 +62,11 @@ namespace CutOnce.Vision
             {
                 var found = t.Find("Label");
                 if (found == null) return;
-                cached = new Cached { transform = found, text = found.GetComponent<TextMesh>() };
+                var box = t.Find("Highlight");
+                cached = new Cached { transform = found, text = found.GetComponent<TextMesh>(), box = box, glow = box != null ? box.GetComponent<MeshRenderer>() : null };
                 _labels[o.visual] = cached;
             }
+            Fit(o, cached);
             var label = cached.transform;
 
             if (cached.text != null && (showConfidence || cached.lastName != o.className))
@@ -94,6 +101,29 @@ namespace CutOnce.Vision
             o.visual = null;
         }
 
+        /// <summary>
+        /// The highlight is the size the thing measured, not a cube. Eased like the position, so a box that grows by
+        /// a centimetre between frames does not flicker, and the one being looked at is drawn a little stronger.
+        /// Everything here is cached: this runs per object per frame, where a string Find or a fresh property block
+        /// is exactly the per-frame cost AGENTS rule 10 is about.
+        /// </summary>
+        private void Fit(TrackedObject o, Cached cached)
+        {
+            if (cached.box == null) return;
+            var want = o.smoothedWorldSize == Vector3.zero ? defaultSize : o.smoothedWorldSize;
+            cached.box.localScale = Vector3.Lerp(cached.box.localScale, want, 1f - Mathf.Exp(-followSpeed * Time.deltaTime));
+            cached.transform.localPosition = new Vector3(0f, cached.box.localScale.y * 0.5f + labelHeight, 0f);
+            var focused = o == Focused;
+            if (cached.glow == null || focused == cached.wasFocused) return;   // the colour only changes when what you look at does
+            cached.wasFocused = focused;
+            _props ??= new MaterialPropertyBlock();
+            var colour = highlightColour;
+            colour.a *= focused ? 1f : 0.55f;
+            _props.SetColor(TintId, colour);
+            _props.SetFloat(PulseRadiusId, 9999f);
+            cached.glow.SetPropertyBlock(_props);
+        }
+
         private GameObject Build(TrackedObject o)
         {
             var root = new GameObject($"[Vision] {o.className}");
@@ -104,7 +134,7 @@ namespace CutOnce.Vision
                 var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 box.name = "Highlight";
                 box.transform.SetParent(root.transform, false);
-                box.transform.localScale = defaultSize;
+                box.transform.localScale = o.smoothedWorldSize == Vector3.zero ? defaultSize : o.smoothedWorldSize;
                 // An overlay must never eat a controller ray or a physics query. Destroy() is deferred to
                 // end of frame, so disable first — otherwise the collider is live for one frame.
                 var collider = box.GetComponent<Collider>();
@@ -125,7 +155,7 @@ namespace CutOnce.Vision
 
             var labelGo = new GameObject("Label");
             labelGo.transform.SetParent(root.transform, false);
-            labelGo.transform.localPosition = new Vector3(0f, labelHeight, 0f);
+            labelGo.transform.localPosition = new Vector3(0f, (o.smoothedWorldSize == Vector3.zero ? defaultSize : o.smoothedWorldSize).y * 0.5f + labelHeight, 0f);
 
             var text = labelGo.AddComponent<TextMesh>();
             text.text = o.className;
@@ -152,7 +182,10 @@ namespace CutOnce.Vision
             shadow.alignment = text.alignment; shadow.richText = false;
             shadow.color = new Color(0.02f, 0.03f, 0.03f, 1f);
             shadowGo.GetComponent<MeshRenderer>().sharedMaterial = text.GetComponent<MeshRenderer>().sharedMaterial;
-            _labels[root] = new Cached { transform = labelGo.transform, text = text, shadow = shadow };
+            // The highlight goes in the cache with the label: Fit() resizes and dims it every frame and must not go
+            // looking for it by name.
+            var built = root.transform.Find("Highlight");
+            _labels[root] = new Cached { transform = labelGo.transform, text = text, shadow = shadow, box = built, glow = built != null ? built.GetComponent<MeshRenderer>() : null };
             return root;
         }
 

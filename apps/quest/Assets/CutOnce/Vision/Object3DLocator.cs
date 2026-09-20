@@ -42,13 +42,17 @@ namespace CutOnce.Vision
         [Range(0.1f, 1f)] public float minValidFraction = 0.4f;
 
         [Tooltip("Percentile of hit distances to use. Below 0.5 biases toward the near surface (the object, not the wall behind it).")]
-        [Range(0f, 1f)] public float distancePercentile = 0.4f;
+        [Range(0f, 1f)] public float distancePercentile = 0.3f;   // bias to the near surface: the object, not the desk behind it
 
         public float minDistance = 0.2f;   // Quest depth is unreliable closer than this
         public float maxDistance = 6f;     // official guidance: limited accuracy beyond ~4m
 
         [Tooltip("Used only where there is no depth sensing (running from the Editor over Link): how far down the ray to put an object the room's own planes did not catch.")]
         public float fallbackDistance = 2f;
+
+        [Tooltip("The smallest and largest a highlight may be, whatever the box says.")]
+        public float minSize = 0.04f;
+        public float maxSize = 1.2f;
 
         public int LastAttempts { get; private set; }
         public int LastSuccesses { get; private set; }
@@ -99,7 +103,35 @@ namespace CutOnce.Vision
         /// World position of a detection, or false if the room did not answer. <paramref name="cameraPose"/>
         /// must be the pose captured with the frame the detection came from.
         /// </summary>
-        public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world)
+        public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world) => TryLocate(detection, cameraPose, out world, out _);
+
+        /// <summary>
+        /// As above, and how big the thing is: the box's own rays, opened out at the distance it turned out to be.
+        /// A box 100 px wide at 1 m is not the same object as one 100 px wide at 3 m, and a glow that ignores that is
+        /// a 28 cm cube over everything — which is what it was.
+        /// </summary>
+        public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world, out Vector3 worldSize)
+        {
+            worldSize = default;
+            if (!Locate(detection, cameraPose, out world)) return false;
+            var size = detection.inputSize;
+            var box = detection.boundingBox;
+            var d = Vector3.Distance(world, cameraPose.position);
+            // The angle each side of the box covers, turned into metres at that distance.
+            float Across(Vector2 a, Vector2 b) => 2f * d * Mathf.Tan(Vector3.Angle(RayThrough(a, size, cameraPose).direction, RayThrough(b, size, cameraPose).direction) * Mathf.Deg2Rad * 0.5f);
+            var w = Across(new Vector2(box.xMin, box.center.y), new Vector2(box.xMax, box.center.y));
+            var h = Across(new Vector2(box.center.x, box.yMin), new Vector2(box.center.x, box.yMax));
+            // Nothing is seen from behind, so depth is a guess: the narrower of the two sides, which is right for a
+            // can or a bottle and modest for a laptop.
+            var thick = Mathf.Min(w, h);
+            worldSize = new Vector3(Mathf.Clamp(w, minSize, maxSize), Mathf.Clamp(h, minSize, maxSize), Mathf.Clamp(thick, minSize, maxSize));
+            // Depth answers with the face turned towards you, and a box centred there hangs half out of the object.
+            // Push the centre back along the ray by half of what the box is thick.
+            world += (world - cameraPose.position).normalized * (worldSize.z * 0.5f);
+            return true;
+        }
+
+        bool Locate(in DetectedObject detection, Pose cameraPose, out Vector3 world)
         {
             world = default;
             LastAttempts++;
