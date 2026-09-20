@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PROJECT, adbPath, editorVersion, explain, readFindings, readTestResults, simulatorDir, simulatorEnv, unityPath } from "../unity.js";
+import { PROJECT, adbPath, editorVersion, explain, invalidAssetMetadata, readFindings, readTestResults, simulatorDir, simulatorEnv, unityExitCode, unityPath } from "../unity.js";
 
 describe("finding Unity and adb", () => {
   it("reads the pinned editor version from the project", () => {
@@ -57,6 +57,30 @@ describe("reading Unity's output", () => {
     expect(explain("Android NDK not found. Set the NDK path in Preferences.")[0]).toMatch(/Android SDK & NDK Tools/);
     expect(explain("Unable to find JDK: JDK not found")[0]).toMatch(/OpenJDK/);
     expect(explain("[CutOnce] check done: 0 error(s), 1 warning(s)")).toEqual([]);
+  });
+
+  it("finds and deduplicates ignored asset metadata even when Unity repeats it with worker prefixes", () => {
+    const ignoredTest = "The .meta file Assets/CutOnce/Vision/Tests/YoloLabelTests.cs.meta does not have a valid GUID and its corresponding Asset file will be ignored.";
+    const ignoredShader = "The .meta file 'Assets/Surface Paint.shader.meta' does not have a valid GUID and its corresponding Asset file will be ignored.";
+    const log = `[Worker0] ${ignoredTest}\r\n${ignoredShader}\n[Worker1] ${ignoredTest}\n[CutOnce] check done: 0 error(s)`;
+    expect(invalidAssetMetadata(log)).toEqual([ignoredTest, ignoredShader]);
+    expect(explain(log)[0]).toMatch(/ignored 2 asset\(s\).*omitted scripts and tests.*false pass/);
+    expect(explain(log).join("\n")).toContain("YoloLabelTests.cs.meta");
+  });
+
+  it("fails a successful Unity process if invalid metadata silently removed a test", () => {
+    const log = "The .meta file Assets/CutOnce/Vision/Tests/YoloLabelTests.cs.meta does not have a valid GUID and its corresponding Asset file will be ignored.\nTest run completed: 201 passed, 0 failed.";
+    expect(unityExitCode(0, log)).toBe(1);
+    expect(unityExitCode(2, log)).toBe(2);
+    expect(unityExitCode(null, log)).toBe(1);
+  });
+
+  it("preserves exit codes for ordinary logs and does not mistake normal GUID messages for corruption", () => {
+    const log = "Imported Assets/Test.cs with a valid GUID.\n[CutOnce] check done: 0 error(s), 1 warning(s)";
+    expect(invalidAssetMetadata(log)).toEqual([]);
+    expect(unityExitCode(0, log)).toBe(0);
+    expect(unityExitCode(7, log)).toBe(7);
+    expect(unityExitCode(null, log)).toBe(1);
   });
 
   it("reads the check's findings, and none from a missing or half-written file", () => {

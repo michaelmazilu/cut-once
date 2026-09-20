@@ -50,6 +50,18 @@ export function adbPath(unity: string, os: NodeJS.Platform = platform(), env: No
   return p.join(engines, "AndroidPlayer", "SDK", "platform-tools", os === "win32" ? "adb.exe" : "adb");
 }
 
+/** Unity can exit successfully after silently omitting scripts/assets whose metadata GUID is invalid. */
+export function invalidAssetMetadata(log: string): string[] {
+  const messages = log.match(/The \.meta file[^\r\n]*does not have a valid GUID[^\r\n]*/gi) ?? [];
+  return [...new Set(messages.map((message) => message.trim()))];
+}
+
+/** Preserve process failures and reject successful runs that did not import all their assets. */
+export function unityExitCode(status: number | null, log: string): number {
+  if (status === 0 && invalidAssetMetadata(log).length > 0) return 1;
+  return status ?? 1;
+}
+
 /** Turns a failed Unity log into the one sentence that says what to do. */
 export function explain(log: string): string[] {
   const out: string[] = [];
@@ -65,6 +77,11 @@ export function explain(log: string): string[] {
     out.push("Unity has no licence on this machine. Open Unity Hub and sign in once.");
   const errors = [...new Set(log.split("\n").filter((l) => /error CS\d+/.test(l)).map((l) => l.trim()))];
   if (errors.length) out.push(`${errors.length} compile error(s):`, ...errors.slice(0, 15).map((e) => "  " + e));
+  const invalidMetadata = invalidAssetMetadata(log);
+  if (invalidMetadata.length) out.push(
+    `Unity ignored ${invalidMetadata.length} asset(s) with invalid .meta GUIDs. Restore or correct the GUIDs in those existing .meta files and rerun; omitted scripts and tests can otherwise produce a false pass.`,
+    ...invalidMetadata.slice(0, 15).map((message) => "  " + message),
+  );
   return out;
 }
 
@@ -163,7 +180,7 @@ function unity(label: string, args: string[], opts: { graphics?: boolean; window
   const r = spawnSync(exe, [...base, ...args], { stdio: "inherit", env: { ...process.env, ...opts.env }, timeout: minutes * MINUTE, killSignal: "SIGKILL" });
   const log = existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
   if (r.error && (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT") console.error(`Unity did not finish within ${minutes} minutes and was stopped.`);
-  const code = r.status ?? 1;
+  const code = unityExitCode(r.status, log);
   if (code !== 0) explain(log).forEach((l) => console.error(l));
   return { code, log };
 }

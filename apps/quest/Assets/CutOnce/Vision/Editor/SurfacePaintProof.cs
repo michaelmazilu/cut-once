@@ -29,7 +29,7 @@ namespace CutOnce.Vision.Editor
         private sealed class ProofReport
         {
             public string scope = "Synthetic fixture rendered by the production CutOnce/SurfaceGlow shader. " +
-                "Physical fixture color is rendered first; its depth is cleared before overlays, as with passthrough. " +
+                "Physical fixture color is rendered to a texture, then drawn as a depth-free backdrop before overlays. " +
                 "A separate virtual card writes depth but is excluded from environment depth. " +
                 "Not a headset capture; does not validate live detection, depth noise, passthrough, stereo or frame time.";
             public string unity;
@@ -283,8 +283,8 @@ namespace CutOnce.Vision.Editor
             try
             {
                 foreach (var proxy in fixture.proxies) proxy.enabled = false;
-                // This baseline omits the second pass. The no-depth comparisons below therefore
-                // also assert that URP preserves the first pass's color when it clears only depth.
+                // This baseline omits the composition pass. The no-depth comparisons below also
+                // assert that the depth-free backdrop reproduces the original physical image.
                 baseline = Capture(camera, false);
                 Save(baseline, directory, result.baseline);
                 foreach (var proxy in fixture.proxies) proxy.enabled = true;
@@ -349,27 +349,35 @@ namespace CutOnce.Vision.Editor
 
         private static Texture2D Capture(Camera camera, bool renderOverlays = true)
         {
-            var target = RenderTexture.GetTemporary(Width, Height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            var physical = RenderTexture.GetTemporary(Width, Height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            physical.filterMode = FilterMode.Point;
+            RenderTexture composite = null;
+            GameObject backdrop = null;
+            Material backdropMaterial = null;
             var previous = RenderTexture.active;
             try
             {
-                camera.targetTexture = target;
+                camera.targetTexture = physical;
                 camera.cullingMask = 1 << FixtureLayer;
                 camera.clearFlags = CameraClearFlags.SolidColor;
-                var request = new RenderPipeline.StandardRequest { destination = target };
+                var request = new RenderPipeline.StandardRequest { destination = physical };
                 if (!RenderPipeline.SupportsRenderRequest(camera, request))
                     throw new InvalidOperationException("The active render pipeline does not support the surface-proof camera request.");
                 RenderPipeline.SubmitRenderRequest(camera, request);
                 if (renderOverlays)
                 {
-                    // A passthrough image has color but no Unity mesh depth. Keep the physical
-                    // fixture's color, clear its exact mesh depth, and draw only virtual objects.
-                    // Same 2D destination/mip zero: URP renders directly into this texture.
+                    // Base-camera URP requests can discard previous color even with Depth clear
+                    // flags. Draw the physical image through a normal unlit GPU backdrop instead:
+                    // it writes RGBA exactly, writes no depth, and precedes virtual geometry.
+                    // A separate target avoids reading and writing the same texture.
+                    composite = RenderTexture.GetTemporary(Width, Height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                    backdrop = MakeBackdrop(camera, physical, out backdropMaterial);
                     camera.cullingMask = 1 << OverlayLayer;
-                    camera.clearFlags = CameraClearFlags.Depth;
+                    camera.targetTexture = composite;
+                    request.destination = composite;
                     RenderPipeline.SubmitRenderRequest(camera, request);
                 }
-                RenderTexture.active = target;
+                RenderTexture.active = composite != null ? composite : physical;
                 var image = new Texture2D(Width, Height, TextureFormat.RGBA32, false);
                 image.ReadPixels(new Rect(0, 0, Width, Height), 0, 0);
                 image.Apply(false, false);
@@ -381,8 +389,45 @@ namespace CutOnce.Vision.Editor
                 camera.cullingMask = 1 << FixtureLayer;
                 camera.clearFlags = CameraClearFlags.SolidColor;
                 RenderTexture.active = previous;
-                RenderTexture.ReleaseTemporary(target);
+                if (backdrop != null) Object.DestroyImmediate(backdrop);
+                if (backdropMaterial != null) Object.DestroyImmediate(backdropMaterial);
+                if (composite != null) RenderTexture.ReleaseTemporary(composite);
+                RenderTexture.ReleaseTemporary(physical);
             }
+        }
+
+        private static GameObject MakeBackdrop(Camera camera, RenderTexture physical, out Material material)
+        {
+            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.name = "Synthetic passthrough image (color only, no physical depth)";
+            quad.layer = OverlayLayer;
+            Object.DestroyImmediate(quad.GetComponent<Collider>());
+            quad.transform.SetParent(camera.transform, false);
+            var distance = camera.nearClipPlane * 2f;
+            var height = 2f * distance * Mathf.Tan(camera.fieldOfView * .5f * Mathf.Deg2Rad);
+            quad.transform.localPosition = new Vector3(0, 0, distance);
+            quad.transform.localScale = new Vector3(height * camera.aspect, height, 1f);
+            material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            material.SetTexture("_BaseMap", physical);
+            material.SetColor("_BaseColor", Color.white);
+            material.SetFloat("_Cull", (float)CullMode.Off);
+            material.SetFloat("_ZWrite", 0f);
+            // Preserve the source alpha, including its transparent camera background. The
+            // transparent variant affects alpha output; explicit One/Zero blending copies it.
+            material.SetFloat("_Surface", 1f);
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.SetFloat("_SrcBlend", (float)BlendMode.One);
+            material.SetFloat("_DstBlend", (float)BlendMode.Zero);
+            material.SetFloat("_SrcBlendAlpha", (float)BlendMode.One);
+            material.SetFloat("_DstBlendAlpha", (float)BlendMode.Zero);
+            material.renderQueue = (int)RenderQueue.Background;
+            material.SetShaderPassEnabled("DepthOnly", false);
+            material.SetShaderPassEnabled("DepthNormalsOnly", false);
+            var renderer = quad.GetComponent<Renderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            return quad;
         }
 
         private static void CheckVirtualOccluder(Fixture fixture, string directory, ViewResult result,

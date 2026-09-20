@@ -30,8 +30,8 @@ report in `apps/quest/Logs/cli/surface-proof`. This tests the surface renderer,
 not object detection or the headset's sensors. The Mac workflow runs it before
 building the APK and includes its output in the diagnostics artifact.
 
-The fixture renders physical colour first, then clears its Unity depth before
-drawing highlights: real passthrough is not an opaque virtual table. A separate
+The fixture renders physical colour to a texture, then draws it as a depth-free
+backdrop before highlights: real passthrough is not an opaque virtual table. A separate
 virtual card, excluded from environment depth, must still occlude the highlight.
 Assertions also require clear gaps/background and unchanged pixels without
 valid depth. Screenshots upload before the APK build to allow early review.
