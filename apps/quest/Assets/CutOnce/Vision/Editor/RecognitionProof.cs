@@ -46,6 +46,8 @@ namespace CutOnce.Vision.Editor
             public bool cornerBoxes;
             public float nmsIoU;
             public string backend = "CPU";
+            public string preprocessingStrategy = "Production YoloLetterbox: aspect-preserving resize into the model input, centered 114/255 RGB padding; no stretching.";
+            public string detectionCoordinateSpace = "Original source-image pixels, top-left origin, after production inverse letterbox mapping. inputWidth/inputHeight describe the original photo, not the padded model tensor.";
             public float detectorConfidence = DetectorConfidence, scannerConfidence = ScannerConfidence;
             public float minimumGroundTruthIoU = RequiredIoU;
             public string groundTruthFile;
@@ -56,6 +58,7 @@ namespace CutOnce.Vision.Editor
             public InferenceResult coldStartWarmup;
             public bool recoveredAfterWarmup;
             public PreprocessingResult preprocessing;
+            public List<LetterboxResult> letterbox = new List<LetterboxResult>();
             public List<PhotoResult> photos = new List<PhotoResult>();
             public InferenceResult blankNegativeControl;
             public bool blankNegativeControlPassed;
@@ -66,6 +69,7 @@ namespace CutOnce.Vision.Editor
         {
             public string source, sha256, inputImage, annotatedImage;
             public int width, height;
+            public int modelWidth, modelHeight, resizedWidth, resizedHeight, paddingLeft, paddingTop;
             public string[] expectedClasses;
             public bool passed;
             public List<InferenceResult> inferences = new List<InferenceResult>();
@@ -77,6 +81,7 @@ namespace CutOnce.Vision.Editor
             public int iteration, rawCandidates;
             public float milliseconds;
             public float wallClockMilliseconds;
+            public float eventInputWidth, eventInputHeight;
             public bool eventDelivered, timeoutDiscarded;
             public bool passed;
             public string error;
@@ -104,6 +109,35 @@ namespace CutOnce.Vision.Editor
             public string className;
             public float maxScore;
             public int aboveThreshold, candidateCount;
+        }
+
+        [Serializable]
+        private sealed class LetterboxResult
+        {
+            public string name, textureFormat, sourceKind, sourceFormat;
+            public string scope = "Actual production YoloLetterbox.Prepare followed by TextureConverter into a 640x640 NCHW tensor. Known source quadrants validate orientation, RGB and midgray, 114/255 padding, and inverse model-to-source box mapping.";
+            public int sourceWidth, sourceHeight, modelWidth = 640, modelHeight = 640;
+            public bool passed;
+            public List<PixelProbe> pixels = new List<PixelProbe>();
+            public List<BoxMappingProbe> boxes = new List<BoxMappingProbe>();
+        }
+
+        [Serializable]
+        private sealed class PixelProbe
+        {
+            public string name;
+            public int modelX, modelY;
+            public float[] expectedRgb, actualRgb;
+            public float tolerance = .01f;
+            public bool passed;
+        }
+
+        [Serializable]
+        private sealed class BoxMappingProbe
+        {
+            public string name;
+            public float[] modelBox, expectedSourceBox, actualSourceBox;
+            public bool passed;
         }
 
         [Serializable]
@@ -212,6 +246,9 @@ namespace CutOnce.Vision.Editor
         private static IEnumerator Body(string[] paths, string[] expectationGroups)
         {
             yield return CheckPreprocessing();
+            yield return CheckLetterbox(false);
+            yield return CheckLetterbox(true);
+            yield return CheckLetterbox(false, true);
             var blank = new Texture2D(640, 640, TextureFormat.RGBA32, false);
             Owned.Add(blank);
             var gray = new Color32[640 * 640];
@@ -241,11 +278,15 @@ namespace CutOnce.Vision.Editor
                 var photo = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 Owned.Add(photo);
                 if (!photo.LoadImage(bytes)) throw new InvalidOperationException("Cannot decode recognition photo: " + path);
+                var layout = YoloLetterboxLayout.Create(new Vector2Int(photo.width, photo.height), _detector.ModelInputSize);
                 var prefix = "photo-" + (photoIndex + 1).ToString("00", CultureInfo.InvariantCulture);
                 var result = new PhotoResult
                 {
                     source = path, sha256 = Sha256(bytes), width = photo.width, height = photo.height,
                     expectedClasses = expected, inputImage = prefix + "-input.png", annotatedImage = prefix + "-annotated.png",
+                    modelWidth = layout.modelSize.x, modelHeight = layout.modelSize.y,
+                    resizedWidth = layout.resizedSize.x, resizedHeight = layout.resizedSize.y,
+                    paddingLeft = layout.topLeftPadding.x, paddingTop = layout.topLeftPadding.y,
                 };
                 _report.photos.Add(result);
                 File.WriteAllBytes(Path.Combine(_directory, result.inputImage), photo.EncodeToPNG());
@@ -281,7 +322,8 @@ namespace CutOnce.Vision.Editor
             _report.recoveredAfterWarmup = _report.photos.TrueForAll(photo => photo.inferences.TrueForAll(inference => inference.eventDelivered)) &&
                 _report.blankNegativeControl.eventDelivered && !_detector.InferenceRunning;
             var warmupAcceptable = _report.coldStartWarmup.passed || _report.coldStartWarmup.timeoutDiscarded;
-            _report.passed = _report.preprocessing.passed && warmupAcceptable && _report.recoveredAfterWarmup &&
+            _report.passed = _report.preprocessing.passed && _report.letterbox.Count == 3 && _report.letterbox.TrueForAll(result => result.passed) &&
+                warmupAcceptable && _report.recoveredAfterWarmup &&
                 _report.photos.TrueForAll(photo => photo.passed) && _report.blankNegativeControlPassed;
             if (!_report.passed) _report.error = "At least one actual model-output assertion failed; inspect photo inferences and the negative control.";
         }
@@ -328,6 +370,119 @@ namespace CutOnce.Vision.Editor
             Debug.Log("[Recognition proof] Actual RGB/gray preprocessing check: " + (_report.preprocessing.passed ? "PASS" : "FAIL"));
         }
 
+        private static IEnumerator CheckLetterbox(bool portrait, bool cameraRenderTexture = false)
+        {
+            var width = portrait ? 80 : 160;
+            var height = portrait ? 160 : 80;
+            var source = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            Owned.Add(source);
+            var sourcePixels = new Color32[width * height];
+            for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                    sourcePixels[y * width + x] = y >= height / 2
+                        ? x < width / 2 ? new Color32(255, 0, 0, 255) : new Color32(0, 255, 0, 255)
+                        : x < width / 2 ? new Color32(0, 0, 255, 255) : new Color32(128, 128, 128, 255);
+            source.SetPixels32(sourcePixels);
+            source.Apply(false, false);
+            Texture sourceTexture = source;
+            if (cameraRenderTexture)
+            {
+                // MRUK on the headset provides an sRGB RenderTexture in a linear project. Populate
+                // that same format from known encoded RGB, preserving graphics state afterwards.
+                // This is a buffer-format/color test, not a simulated live headset camera.
+                var renderTexture = new RenderTexture(width, height, 0, source.graphicsFormat);
+                Owned.Add(renderTexture);
+                renderTexture.Create();
+                var oldWrite = GL.sRGBWrite;
+                var oldTarget = RenderTexture.active;
+                try
+                {
+                    GL.sRGBWrite = QualitySettings.activeColorSpace == ColorSpace.Linear;
+                    Graphics.Blit(source, renderTexture);
+                }
+                finally
+                {
+                    GL.sRGBWrite = oldWrite;
+                    RenderTexture.active = oldTarget;
+                }
+                sourceTexture = renderTexture;
+            }
+            var result = new LetterboxResult
+            {
+                name = (portrait ? "portrait" : "wide") + (cameraRenderTexture ? "-camera-format-rendertexture" : "-texture2d"),
+                sourceWidth = width, sourceHeight = height,
+                sourceKind = cameraRenderTexture ? "RenderTexture (same sRGB format as MRUK; fixture pixels, not live camera)" : "Texture2D",
+                sourceFormat = sourceTexture.graphicsFormat.ToString(),
+            };
+            _report.letterbox.Add(result);
+            var red = new[] { 1f, 0f, 0f };
+            var green = new[] { 0f, 1f, 0f };
+            var blue = new[] { 0f, 0f, 1f };
+            var gray = new[] { 128f / 255f, 128f / 255f, 128f / 255f };
+            var padding = new[] { 114f / 255f, 114f / 255f, 114f / 255f };
+            // Hard-coded expected positions make this independent of the layout code being tested.
+            // Content occupies [0,160]-[640,480] for wide, [160,0]-[480,640] for portrait.
+            result.pixels.Add(new PixelProbe { name = "top-left red", modelX = portrait ? 240 : 160, modelY = portrait ? 160 : 240, expectedRgb = red });
+            result.pixels.Add(new PixelProbe { name = "top-right green", modelX = portrait ? 400 : 480, modelY = portrait ? 160 : 240, expectedRgb = green });
+            result.pixels.Add(new PixelProbe { name = "bottom-left blue", modelX = portrait ? 240 : 160, modelY = portrait ? 480 : 400, expectedRgb = blue });
+            result.pixels.Add(new PixelProbe { name = "bottom-right midgray", modelX = portrait ? 400 : 480, modelY = portrait ? 480 : 400, expectedRgb = gray });
+            result.pixels.Add(new PixelProbe { name = "leading padding", modelX = portrait ? 80 : 320, modelY = portrait ? 320 : 80, expectedRgb = padding });
+            result.pixels.Add(new PixelProbe { name = "trailing padding", modelX = portrait ? 560 : 320, modelY = portrait ? 320 : 560, expectedRgb = padding });
+            using (var letterbox = new YoloLetterbox())
+            using (var input = new Tensor<float>(new TensorShape(1, 3, 640, 640)))
+            {
+                var prepared = letterbox.Prepare(sourceTexture, new Vector2Int(640, 640));
+                result.textureFormat = prepared.graphicsFormat.ToString();
+                TextureConverter.ToTensor(prepared, input, new TextureTransform().SetDimensions(640, 640, 3));
+                var readback = input.ReadbackAndCloneAsync().GetAwaiter();
+                var deadline = EditorApplication.timeSinceStartup + InferenceDeadlineSeconds;
+                while (!readback.IsCompleted)
+                {
+                    if (EditorApplication.timeSinceStartup > deadline) throw new TimeoutException("Production letterbox tensor readback did not complete.");
+                    yield return null;
+                }
+                using (var pixels = readback.GetResult())
+                {
+                    foreach (var probe in result.pixels)
+                    {
+                        probe.actualRgb = new float[3];
+                        probe.passed = true;
+                        for (var channel = 0; channel < 3; channel++)
+                        {
+                            var value = pixels[channel * 640 * 640 + probe.modelY * 640 + probe.modelX];
+                            probe.actualRgb[channel] = value;
+                            if (!Finite(value) || Mathf.Abs(value - probe.expectedRgb[channel]) > probe.tolerance) probe.passed = false;
+                        }
+                    }
+                }
+                result.boxes.Add(CheckBoxMapping("interior box", letterbox.Layout,
+                    portrait ? new Rect(200, 80, 160, 240) : new Rect(80, 200, 240, 160),
+                    portrait ? new Rect(10, 20, 40, 60) : new Rect(20, 10, 60, 40)));
+                result.boxes.Add(CheckBoxMapping("full content maps to full source", letterbox.Layout,
+                    portrait ? new Rect(160, 0, 320, 640) : new Rect(0, 160, 640, 320),
+                    new Rect(0, 0, width, height)));
+            }
+            result.passed = result.pixels.TrueForAll(probe => probe.passed) && result.boxes.TrueForAll(probe => probe.passed);
+            Debug.Log($"[Recognition proof] Actual production letterbox {result.name}: {(result.passed ? "PASS" : "FAIL")}");
+        }
+
+        private static BoxMappingProbe CheckBoxMapping(string name, YoloLetterboxLayout layout, Rect model, Rect expected)
+        {
+            var actual = layout.ToSourceRect(model);
+            var result = new BoxMappingProbe
+            {
+                name = name,
+                modelBox = new[] { model.x, model.y, model.width, model.height },
+                expectedSourceBox = new[] { expected.x, expected.y, expected.width, expected.height },
+                actualSourceBox = new[] { actual.x, actual.y, actual.width, actual.height },
+                passed = true,
+            };
+            for (var index = 0; index < result.actualSourceBox.Length; index++)
+                if (!Finite(result.actualSourceBox[index]) || Mathf.Abs(result.actualSourceBox[index] - result.expectedSourceBox[index]) > .001f)
+                    result.passed = false;
+            return result;
+        }
+
         private static IEnumerator Infer(Texture photo, int iteration, Action<InferenceResult> done)
         {
             var result = new InferenceResult { iteration = iteration, passed = true };
@@ -336,8 +491,14 @@ namespace CutOnce.Vision.Editor
             void Capture(List<DetectedObject> detections, Pose pose, Vector2 inputSize)
             {
                 delivered = true;
+                result.eventInputWidth = inputSize.x;
+                result.eventInputHeight = inputSize.y;
+                if (inputSize.x != photo.width || inputSize.y != photo.height)
+                    Reject(result, "Production event inputSize must use original source-image dimensions after inverse letterbox mapping.");
                 foreach (var detection in detections)
                 {
+                    if (detection.inputSize != inputSize)
+                        Reject(result, "Per-detection input size does not match the source-coordinate event contract.");
                     var box = detection.boundingBox;
                     var finite = Finite(box.x) && Finite(box.y) && Finite(box.width) && Finite(box.height) &&
                         Finite(detection.confidence) && Finite(inputSize.x) && Finite(inputSize.y);

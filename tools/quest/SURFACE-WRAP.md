@@ -65,11 +65,29 @@ image orientation and encoded mid-gray values. Optional pre-NMS class scores
 explain low-confidence misses without changing the acceptance thresholds;
 this extra diagnostic pass is disabled in the normal headset pipeline.
 
+The stretch-input baseline at `bf24b4c` is deliberately retained in Actions run
+`35497651075`: RGB/orientation checks passed and repeated inference recovered,
+but **both recorded photos failed recognition acceptance**. Before thresholding
+or NMS, the best bottle/table scores were 0.098/0.087 on photo 160012 and
+0.342/0.302 on photo 146489, below the unchanged 0.40 scanner cutoff. The first
+photo still found a person and pizza; the second found a wine glass and pizza.
+Do not describe that run as successful table/bottle recognition. It is the
+same-input baseline for subsequent preprocessing changes, not a reason to
+remove the failing photos or lower their required confidence/overlap.
+
 The bundled Meta model already converts its output to `(x1,y1,x2,y2)` corners;
 decoding it again as centre/size misplaces the depth rays. `cornerBoxes` therefore
 defaults to true, matching the bundled asset and Meta's converter. A recorded
 photo proof validates this path but cannot validate physical camera access,
 permissions, stereo alignment or Quest performance while the device is disconnected.
+
+Camera images now fit inside the model's fixed square without stretching:
+`YoloLetterbox` preserves the aspect ratio and pads with encoded RGB 114.
+Decoded boxes are mapped back to original camera-image pixels before any depth
+rays or labels are placed. The GPU proof checks landscape/portrait inputs and
+the same sRGB RenderTexture format used by the camera, including padding,
+orientation, colours and inverse coordinates. A camera-format test buffer is
+still synthetic input, not evidence that the physical camera works.
 
 Photo URLs, SHA-256 digests, original Flickr sources and CC BY 2.0 license links
 are recorded in `tools/quest/fixtures/recognition-coco.json`. Inputs are downloaded

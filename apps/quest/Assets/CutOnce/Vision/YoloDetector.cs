@@ -69,6 +69,8 @@ namespace CutOnce.Vision
         public int LastAcceptedDetections { get; private set; }
         public int TotalInferences { get; private set; }
         public string LastError { get; private set; } = "";
+        public Vector2Int ModelInputSize => _inputSize;
+        public YoloLetterboxLayout LastLetterboxLayout => _letterbox.Layout;
 
         /// <summary>
         /// Scores from the model head before thresholding or NMS. The converted model retains only
@@ -97,6 +99,8 @@ namespace CutOnce.Vision
         private Worker _worker;
         private Tensor<float> _input;
         private Vector2Int _inputSize;
+        private Vector2Int _sourceSize;
+        private readonly YoloLetterbox _letterbox = new YoloLetterbox();
         private string[] _labels;
         private VisionCamera _camera;
         private readonly List<(int classId, Vector4 box, float score)> _nmsResults = new();
@@ -245,7 +249,7 @@ namespace CutOnce.Vision
             DisposeAll(boxes, classIds, scores);
             if (!decoded) yield break;
 
-            OnDetections?.Invoke(_detections, cameraPose, _inputSize);
+            OnDetections?.Invoke(_detections, cameraPose, _sourceSize);
         }
 
         /// <summary>Decode + NMS. Isolated so the coroutine never has a yield inside a try/catch.</summary>
@@ -266,7 +270,10 @@ namespace CutOnce.Vision
                 _detections.Clear();
                 foreach (var (classId, box, score) in _nmsResults)
                 {
-                    var rect = new Rect(box.x, box.y, box.z - box.x, box.w - box.y);
+                    var rect = _letterbox.Layout.ToSourceRect(new Rect(box.x, box.y, box.z - box.x, box.w - box.y));
+                    // Ignore padding-only detections wholly outside the camera image. Partially
+                    // visible objects retain their raw extent rather than being silently clamped.
+                    if (rect.xMax <= 0f || rect.yMax <= 0f || rect.xMin >= _sourceSize.x || rect.yMin >= _sourceSize.y) continue;
                     _detections.Add(new DetectedObject
                     {
                         classId = classId,
@@ -274,7 +281,7 @@ namespace CutOnce.Vision
                         confidence = score,
                         boundingBox = rect,
                         centerPixel = rect.center,
-                        inputSize = _inputSize,
+                        inputSize = _sourceSize,
                     });
                 }
                 LastAcceptedDetections = _detections.Count;
@@ -294,8 +301,9 @@ namespace CutOnce.Vision
             try
             {
                 if (_input == null) _input = new Tensor<float>(new TensorShape(1, 3, _inputSize.x, _inputSize.y));
-                var transform = new TextureTransform().SetDimensions(_inputSize.x, _inputSize.y, 3);   // the tensor's size: the camera frame is not square, the model's input is
-                TextureConverter.ToTensor(texture, _input, transform);
+                _sourceSize = new Vector2Int(texture.width, texture.height);
+                var prepared = _letterbox.Prepare(texture, _inputSize);
+                TextureConverter.ToTensor(prepared, _input);
                 _worker.Schedule(_input);
                 return true;
             }
@@ -463,6 +471,7 @@ namespace CutOnce.Vision
             StopAllCoroutines();                                             // a readback still in flight must not land on a disposed worker
             _worker?.Dispose();
             _input?.Dispose();
+            _letterbox.Dispose();
         }
     }
 }
