@@ -71,6 +71,8 @@ const NOTHING_ON_SHOW: FastPath = {
 };
 
 const PLAIN_ASK = /^(?:(?:hey )?(?:kit )?)?(?:what (?:can|could|should|do) (?:i|we) (?:build|make)(?: with (?:this|these|that|all this|all of this|this stuff))?|help me build something|build something|make something)$/;
+/** An explicit request to hear the current generated-build instruction, never a request for a new design. */
+const INSTRUCTION_ASK = /^(?:(?:hey )?(?:kit )?)?(?:how (?:do|should|can) i (?:build|make|assemble|put together) (?:it|this|that)|(?:tell|show) me how to (?:build|make|assemble|put together) (?:it|this|that)|(?:read|read out|give|show|tell) me (?:the )?(?:build |building |assembly )?instructions(?: for (?:it|this|that))?|what (?:do|should) i do (?:now|next)|what is (?:the )?(?:current|next) step|whats (?:the )?(?:current|next) step|help me (?:build|make|assemble) (?:it|this|that)|walk me through (?:it|this|that)|instructions)$/;
 const ASKING = "(?:hey kit )?(?:kit )?(?:(?:can|could|would|will) you |please )?";
 /**
  * "Build me a birdhouse", "let's make a robot", "can we build a tower with these": the thing asked for, as said.
@@ -123,6 +125,22 @@ export function matchFastPath(transcript: string, input: FastPathInput): FastPat
   if (wish) return { action: { type: "start_scan" }, answer_text: `Let me see how to make ${wish} from what's here.`, highlight_parts: [], wish, change: CHANGE.test(wish) };
   if (/^scan (this|that|again|the table)$/.test(text) || (mode === "build" && text === "look again")) {
     return { action: { type: "start_scan" }, answer_text: "Let me see what you've got.", highlight_parts: [] };
+  }
+
+  // In an active generated build, read the authoritative current step through the normal response/TTS path and keep
+  // its step parts highlighted. During scanning or design selection the server may still hold an older run;
+  // never read that hidden run's instructions.
+  if (INSTRUCTION_ASK.test(text)) {
+    if (mode !== "build") return null;
+    if (!isBuildPlan(plan)) return null;
+    if (input.buildShowing === false) return NOTHING_ON_SHOW;
+    const step = plan.steps.find((candidate) => candidate.step_id === state.current_step_id);
+    if (!step) return { action: null, answer_text: "That's the whole build. Nice work!", highlight_parts: [] };
+    return {
+      action: null,
+      answer_text: `Step ${step.index} of ${plan.steps.length}. ${step.instruction}`,
+      highlight_parts: step.part_ids,
+    };
   }
 
   // "next" / "back": pure headset navigation, no event. Left alone when nothing is on show — it writes nothing and

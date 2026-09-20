@@ -15,6 +15,7 @@ const files = {
   app: "apps/quest/Assets/CutOnce/Device/CutOnceApp.cs",
   controller: "apps/quest/Assets/CutOnce/Copilot/CopilotController.cs",
   client: "apps/quest/Assets/CutOnce/Copilot/Net/CopilotClient.cs",
+  fastpath: "services/api/src/copilot/fastpath.ts",
   scanner: "apps/quest/Assets/CutOnce/Vision/RoomScanner.cs",
   tracker: "apps/quest/Assets/CutOnce/Vision/TrackedObjectManager.cs",
   visualizer: "apps/quest/Assets/CutOnce/Vision/ObjectVisualizer.cs",
@@ -60,6 +61,11 @@ export function pillarProblems(root = ROOT, read: Reader = p => readFileSync(p, 
   const timeout = text("client").match(/timeoutSeconds\s*=\s*([0-9]+)f/);
   needs("P1-LATENCY", Boolean(timeout && Number(timeout[1]) >= 20),
     "The Quest query timeout must leave at least 20 seconds for upload, the server cap and tunnel latency.");
+  const fastpath = text("fastpath");
+  needs("P1-BUILD-INSTRUCTIONS", /INSTRUCTION_ASK/.test(fastpath)
+    && /answer_text:\s*`Step \$\{step\.index\} of \$\{plan\.steps\.length\}\. \$\{step\.instruction\}`/.test(fastpath)
+    && /highlight_parts:\s*step\.part_ids/.test(fastpath),
+    "An explicit build-instruction prompt must speak the authoritative current step and highlight its parts.");
 
   const scanner = text("scanner");
   needs("P2-VISION-FALLBACK", /Visualizer\.Show\(o, o == focus, Drawable\(o\)\)/.test(scanner),
