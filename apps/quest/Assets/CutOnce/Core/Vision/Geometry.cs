@@ -30,6 +30,9 @@ namespace CutOnce.Core.Vision
     /// </summary>
     public static class BoxMath
     {
+        /// <summary>How much worse than the best an edge's rectangle may be and still count as tied.</summary>
+        const float AreaTie = 0.05f;
+
         /// <summary>The value at a fraction of the way through a SORTED list. Linear between neighbours.</summary>
         public static float Percentile(IReadOnlyList<float> sorted, float fraction)
         {
@@ -130,9 +133,6 @@ namespace CutOnce.Core.Vision
             return Wrap90(bestYaw);
         }
 
-        /// <summary>How much worse than the best an edge's rectangle may be and still count as tied.</summary>
-        const float AreaTie = 0.05f;
-
         static bool EdgeDirection(List<P3> hull, int i, out float ex, out float ez)
         {
             var a = hull[i];
@@ -187,11 +187,19 @@ namespace CutOnce.Core.Vision
         public static P3 FromBoxFrame(float u, float y, float v, float cos, float sin) =>
             new P3(u * cos + v * sin, y, -u * sin + v * cos);
 
-        /// <summary>A box turned 90° is the same box: yaw is reported in (-45, 45] so smoothing never chases a flip.</summary>
+        /// <summary>
+        /// A box turned 90° is the same box: yaw is reported in (-45, 45] so smoothing never chases a flip.
+        ///
+        /// Whole quarter-turns come off in ONE step rather than a loop. `while (deg > 45f) deg -= 90f` never returns
+        /// for a large float — 1e10f - 90f is exactly 1e10f — and this is called on every smoother update, so one
+        /// garbage yaw from a caller would wedge the render thread rather than drawing a wrong box.
+        /// </summary>
         public static float Wrap90(float deg)
         {
-            while (deg > 45f) deg -= 90f;
-            while (deg <= -45f) deg += 90f;
+            if (float.IsNaN(deg) || float.IsInfinity(deg)) return 0f;
+            deg -= 90f * (float)Math.Round(deg / 90.0);
+            if (deg > 45f) deg -= 90f;          // Round() can land exactly on the open end
+            if (deg <= -45f) deg += 90f;
             return deg;
         }
 

@@ -67,6 +67,33 @@ namespace CutOnce.Core.Tests
         }
 
         [Test]
+        public void TheBoxFrameAndTheWorldAreExactInverses()
+        {
+            // DepthScene turns its bodies with the same two helpers the fit uses to read a turn back, which makes
+            // every scene-driven yaw assertion self-consistent even if BOTH were mirrored. This pins them to
+            // hand-computed numbers instead: at 90°, Unity takes +X to (0, 0, -1), so a point on +X reads back as
+            // v = +1 in the box's frame.
+            var r = 90f * (float)Math.PI / 180f;
+            float cos = (float)Math.Cos(r), sin = (float)Math.Sin(r);
+            BoxMath.ToBoxFrame(new P3(1f, 0f, 0f), cos, sin, out var u, out var v);
+            Assert.That(u, Is.EqualTo(0f).Within(1e-5f));
+            Assert.That(v, Is.EqualTo(1f).Within(1e-5f));
+
+            var back = BoxMath.FromBoxFrame(0f, 0f, 1f, cos, sin);
+            Assert.That(back.X, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(back.Z, Is.EqualTo(0f).Within(1e-5f));
+
+            // …and they invert each other at an awkward angle, not just at right angles.
+            var odd = 37f * (float)Math.PI / 180f;
+            float c2 = (float)Math.Cos(odd), s2 = (float)Math.Sin(odd);
+            var start = new P3(0.31f, 0.8f, -0.17f);
+            BoxMath.ToBoxFrame(start, c2, s2, out var u2, out var v2);
+            var round = BoxMath.FromBoxFrame(u2, start.Y, v2, c2, s2);
+            Assert.That(round.X, Is.EqualTo(start.X).Within(1e-5f));
+            Assert.That(round.Z, Is.EqualTo(start.Z).Within(1e-5f));
+        }
+
+        [Test]
         public void AQuarterTurnIsTheSameBox()
         {
             Assert.That(BoxMath.Wrap90(90f), Is.EqualTo(0f).Within(1e-4f));

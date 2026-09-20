@@ -86,17 +86,137 @@ namespace CutOnce.Core.Tests
             var body = new DepthScene.Body { Centre = new P3(0f, 0.75f, 0.2f), Size = new P3(0.32f, 0.02f, 0.22f) };
             var fit = FitOf(body, "bottle", new P3(0f, 1.5f, -0.7f));
             Assert.That(fit.Ok, Is.False);
-            Assert.That(fit.Reason, Does.Contain("not a bottle"));
+            Assert.That(fit.Reason, Does.Contain("does not match bottle"));
         }
 
         [Test]
         public void PeopleAndFurnitureAreNeverBoxed()
         {
             Assert.That(SizePriors.Ignored("person"), Is.True);
-            foreach (var room in new[] { "chair", "dining table", "tv", "couch", "refrigerator" })
+            foreach (var room in new[] { "chair", "diningtable", "tvmonitor", "sofa", "refrigerator", "pottedplant" })
                 Assert.That(SizePriors.Ignored(room), Is.True, room);
             foreach (var material in new[] { "bottle", "laptop", "cup", "book" })
                 Assert.That(SizePriors.Ignored(material), Is.False, material);
+        }
+
+        [Test]
+        public void NamesMatchTheModel()
+        {
+            // The list above is only worth anything if it spells classes the way the MODEL does. It did not: the
+            // detector emits darknet's COCO names, so `couch`, `dining table`, `tv` and `potted plant` matched
+            // nothing and four furniture classes walked straight through the filter meant to stop them. Asserting
+            // against hardcoded strings could never have caught that, so this reads the model's own label file.
+            var labels = System.IO.File.ReadAllLines(System.IO.Path.Combine(
+                RepoFiles.Root, "apps", "quest", "Assets", "CutOnce", "Vision", "Resources", "SentisYoloClasses.txt"));
+            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in labels)
+                if (!string.IsNullOrWhiteSpace(line)) known.Add(line.Trim());
+
+            Assert.That(known, Is.Not.Empty, "the label file should not be empty");
+            foreach (var name in SizePriors.AllKnownNames())
+                Assert.That(known.Contains(name), Is.True,
+                    $"'{name}' is not a class this model can ever emit — check the spelling against SentisYoloClasses.txt");
+        }
+
+        [Test]
+        public void ASliverIsNeverInflatedIntoACylinder()
+        {
+            // A flat face — a patch of wall, the side of a carton, a bad cluster — measured 12 x 10 x 0.5 cm. The
+            // round-class depth completion used to widen that sliver to 12 cm and hand back a confident "cup",
+            // manufacturing the very dimension the plausibility check exists to police.
+            var body = new DepthScene.Body { Centre = new P3(0f, 0.85f, 1.2f), Size = new P3(0.12f, 0.1f, 0.005f) };
+            foreach (var round in new[] { "cup", "bottle", "vase" })
+            {
+                var fit = FitOf(body, round, Eye);
+                Assert.That(fit.Ok, Is.False, $"a 5 mm sliver must not become a {round}: {fit}");
+            }
+        }
+
+        [Test]
+        public void TheFloorOnlyEverMovesDownToTheSurface()
+        {
+            // MRUK's plane is not always where the surface is — a tablecloth, a mat, or plain anchor drift puts it
+            // a few centimetres out, and then it cuts THROUGH what is standing there. Snapping a box's floor UP to
+            // such a plane crops the box; the snap exists to extend a box DOWN onto a surface, never to cut one off
+            // at it. Left unguarded this took 30 cm off the panel below at full confidence.
+            //
+            // The cloud is built by hand rather than ray-cast: the scene's table plane is opaque and infinite, so
+            // nothing below a surface is ever visible in it, and this case needs points on both sides of one.
+            var eye = new P3(0f, 1.0f, -0.9f);
+            var panel = new List<P3>();
+            for (var y = 0.50f; y <= 0.99f; y += 0.02f)
+            {
+                if (Math.Abs(y - 0.80f) <= 0.013f) continue;         // the slab the support removal will take out
+                for (var x = -0.15f; x <= 0.15f; x += 0.02f) panel.Add(new P3(x, y, 3.0f));      // the face…
+                for (var z = 3.02f; z <= 3.12f; z += 0.02f) panel.Add(new P3(-0.15f, y, z));     // …and one side
+            }
+
+            var fit = ObjectBoxFitter.Fit(panel, eye, SizePriors.For("teddy bear"), new FitOptions { SupportY = 0.80f });
+            Assert.That(fit.Ok, Is.True, fit.Reason);
+            Assert.That(fit.Size.Y, Is.GreaterThan(0.45f), $"the box was cropped at the plane: {fit}");
+            Assert.That(fit.Centre.Y, Is.EqualTo(0.745f).Within(0.03f), $"and its centre rose with it: {fit}");
+        }
+
+        [Test]
+        public void AYawFromNowhereDoesNotHang()
+        {
+            // Wrap90 used to loop subtracting 90 until the value came down, which never happens for a large float.
+            // It is called on every smoother update, so a single garbage yaw would wedge the render thread.
+            Assert.That(BoxMath.Wrap90(1e10f), Is.InRange(-45f, 45f));
+            Assert.That(BoxMath.Wrap90(float.PositiveInfinity), Is.EqualTo(0f));
+            Assert.That(BoxMath.Wrap90(float.NaN), Is.EqualTo(0f));
+            Assert.That(BoxMath.Wrap90(-1e9f), Is.InRange(-45f, 45f));
+        }
+
+        [Test]
+        public void ANonsensePoseIsRefusedAtTheDoor()
+        {
+            var patch = DepthScene.Patch(Bottle(), Eye);
+            var fit = ObjectBoxFitter.Fit(patch, new P3(float.NaN, 1.35f, -0.9f), SizePriors.For("bottle"));
+            Assert.That(fit.Ok, Is.False);
+            Assert.That(fit.Reason, Does.Contain("not a number"), fit.Reason);
+        }
+
+        [Test]
+        public void ADisagreeingFitBarelyMovesASettledBox()
+        {
+            var smoother = new BoxSmoother();
+            var body = Bottle();
+            for (var i = 0; i < 4; i++) smoother.Update(FitOf(body, "bottle", Eye, new DepthScene.Options { Seed = i }), 1f / 3f);
+            var settled = smoother.Size;
+
+            // Same place, wildly different size, over and over. It should creep, not leap.
+            for (var i = 0; i < 4; i++)
+                smoother.Update(FitResult.Fitted(smoother.Centre, 0f, new P3(0.4f, 0.9f, 0.4f), 1f, 200), 1f / 3f);
+            Assert.That(smoother.Size.Y - settled.Y, Is.LessThan(0.1f), $"held size ran away to {smoother.Size}");
+            Assert.That(smoother.Stable, Is.False, "fits that disagree must not count towards stability");
+        }
+
+        [Test]
+        public void NoTimePassingConfirmsNothing()
+        {
+            var smoother = new BoxSmoother();
+            var body = Bottle();
+            for (var i = 0; i < 4; i++) smoother.Update(FitOf(body, "bottle", Eye, new DepthScene.Options { Seed = i }), 0f);
+            Assert.That(smoother.HasBox, Is.True, "the first sighting still gives a box");
+            Assert.That(smoother.Stable, Is.False, "three zero-length cycles are not three confirmations");
+        }
+
+        [Test]
+        public void JumpsEitherSideOfAGapAreNotOneStory()
+        {
+            var smoother = new BoxSmoother();
+            var body = Bottle();
+            for (var i = 0; i < 4; i++) smoother.Update(FitOf(body, "bottle", Eye, new DepthScene.Options { Seed = i }), 1f / 3f);
+            var held = smoother.Centre;
+
+            var faraway = FitResult.Fitted(new P3(0f, 1.0f, 2.9f), 0f, new P3(0.07f, 0.25f, 0.07f), 0.9f, 80);
+            smoother.Update(faraway, 1f / 3f);                       // one jump…
+            for (var i = 0; i < 20; i++) smoother.Miss(1f / 3f);     // …then seven seconds of seeing nothing
+            smoother.Update(faraway, 1f / 3f);
+            smoother.Update(faraway, 1f / 3f);
+            Assert.That((smoother.Centre - held).Length, Is.LessThan(0.1f),
+                "jumps minutes apart were adopted as though they were consecutive");
         }
 
         [Test]
@@ -181,6 +301,88 @@ namespace CutOnce.Core.Tests
         }
 
         // ── the whole table, printed for inspection ─────────────────────────────────────────────────────────────
+        /// <summary>
+        /// The old sizing and the new one on IDENTICAL depth, so the claim that this is better is a measurement and
+        /// not a hope. Both read the same scene through the same sensor; only the maths between differs.
+        ///
+        /// Error is the worst of the three axes, in centimetres, against the truth. A pipeline that refuses to
+        /// answer scores no error — refusing is a legitimate outcome, and the columns say which happened.
+        /// </summary>
+        [Test]
+        public void TheOldWayAndTheNewWaySideBySide()
+        {
+            var high = new P3(0f, 1.5f, -0.75f);
+            var cases = new (string name, string className, DepthScene.Body body, P3 eye, DepthScene.Options options)[]
+            {
+                ("bottle",            "bottle",     Bottle(0.0f), Eye,  null),
+                ("bottle, far",       "bottle",     Bottle(1.6f), Eye,  null),
+                ("bottle, wide box",  "bottle",     Bottle(0.0f), Eye,  new DepthScene.Options { Margin = 0.8f }),
+                ("cup",               "cup",        new DepthScene.Body { Centre = new P3(0.2f, 0.79f, 0.2f), Size = new P3(0.085f, 0.1f, 0.085f), Cylinder = true }, Eye, null),
+                ("laptop",            "laptop",     new DepthScene.Body { Centre = new P3(0f, 0.75f, 0.25f), Size = new P3(0.32f, 0.02f, 0.22f) }, high, null),
+                ("scissors",          "scissors",   new DepthScene.Body { Centre = new P3(0.1f, 0.745f, 0.2f), Size = new P3(0.2f, 0.01f, 0.07f) }, high, null),
+                ("book turned 30",    "book",       new DepthScene.Body { Centre = new P3(0f, 0.76f, 0.25f), Size = new P3(0.35f, 0.04f, 0.35f), YawDeg = 30f }, high, null),
+                ("backpack, corner",  "backpack",   new DepthScene.Body { Centre = new P3(0f, 0.96f, 0.5f), Size = new P3(0.3f, 0.44f, 0.2f) }, new P3(-0.95f, 1.35f, -0.55f), null),
+                ("bottle, clear",     "bottle",     new DepthScene.Body { Centre = Bottle().Centre, Size = Bottle().Size, Cylinder = true, Invisible = true }, Eye, null),
+                ("person",            "person",     new DepthScene.Body { Centre = new P3(0f, 0.9f, 1.5f), Size = new P3(0.5f, 1.7f, 0.3f) }, Eye, null),
+                ("chair",             "chair",      new DepthScene.Body { Centre = new P3(0.6f, 0.45f, 1.0f), Size = new P3(0.5f, 0.9f, 0.5f) }, Eye, null),
+            };
+
+            double oldTotal = 0, newTotal = 0;
+            int oldMeasured = 0, newMeasured = 0, newWins = 0, oldWins = 0;
+
+            Console.WriteLine();
+            Console.WriteLine("                      |            OLD (ships today)           |             NEW             |");
+            Console.WriteLine("  object              | measured (cm)     size err  centre err | measured (cm)   err  centre |");
+            Console.WriteLine("  " + new string('-', 106));
+            foreach (var c in cases)
+            {
+                var truth = c.body.Size;
+                string oldCell, newCell;
+                double oldErr = -1, newErr = -1;
+
+                if (LegacyLocator.TryLocate(c.body, c.eye, c.className, c.options, out var oldWorld, out var oldSize, out var oldWhy))
+                {
+                    oldErr = Worst(oldSize, truth);
+                    var oldCentre = (oldWorld - c.body.Centre).Length * 100f;
+                    oldCell = $"{Show(oldSize),-17} {oldErr,8:0.#} {oldCentre,10:0.#}";
+                    oldTotal += oldErr; oldMeasured++;
+                }
+                else oldCell = $"{"refused",-17} {oldWhy,19}";
+
+                if (SizePriors.Ignored(c.className))
+                {
+                    newCell = $"{"never boxed",-15} {"",5} {"",6}";
+                }
+                else
+                {
+                    var fit = FitOf(c.body, c.className, c.eye, c.options);
+                    if (fit.Ok)
+                    {
+                        newErr = Worst(fit.Size, truth);
+                        var newCentre = (fit.Centre - c.body.Centre).Length * 100f;
+                        newCell = $"{Show(fit.Size),-15} {newErr,5:0.#} {newCentre,6:0.#}";
+                        newTotal += newErr; newMeasured++;
+                    }
+                    else newCell = $"{"refused",-15} {"",5} {"",6}";
+                }
+
+                if (oldErr >= 0 && newErr >= 0) { if (newErr < oldErr) newWins++; else oldWins++; }
+                Console.WriteLine($"  {c.name,-19} | {oldCell} | {newCell} |");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"  worst-axis error, averaged over what each MEASURED:  old {oldTotal / Math.Max(1, oldMeasured):0.0} cm over {oldMeasured} cases,  new {newTotal / Math.Max(1, newMeasured):0.0} cm over {newMeasured}");
+            Console.WriteLine($"  head to head where BOTH measured:  new closer in {newWins}, old closer in {oldWins}");
+            Console.WriteLine();
+
+            Assert.That(newWins, Is.GreaterThan(oldWins), "the rebuild has to actually win on the same data");
+        }
+
+        static float Worst(P3 measured, P3 truth) =>
+            Math.Max(Math.Abs(measured.X - truth.X), Math.Max(Math.Abs(measured.Y - truth.Y), Math.Abs(measured.Z - truth.Z))) * 100f;
+
+        static string Show(P3 size) => $"{size.X * 100:0.#}x{size.Y * 100:0.#}x{size.Z * 100:0.#}";
+
         [Test]
         public void OneFitCostsLessThanAFrame()
         {

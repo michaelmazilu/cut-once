@@ -29,16 +29,39 @@ namespace CutOnce.Core.Tests
             public float WallZ = 3.0f;        // the far wall, in front of the camera
             public int Pixels = 24;           // rays across the rectangle (24 x 24 = 576, like a real patch)
             public float Margin = 0.35f;      // how far the detection rectangle spills past the object, as a fraction
-            public float NoiseM = 0.004f;     // depth noise, one sigma
+            public float NoiseM = 0.004f;     // depth noise: UNIFORM on +/-NoiseM, so no tails. Real depth has them,
+                                              // and tails are exactly what the percentile trimming exists to survive,
+                                              // so this understates the case the trimming is there for.
             public int Seed = 7;
         }
 
-        /// <summary>The patch a headset would hand the fitter, and the viewer it was seen from.</summary>
-        public static List<P3> Patch(Body body, P3 camera, Options options = null)
+        /// <summary>
+        /// Where the detection rectangle is and which way its rays point. Both pipelines are driven through this, so
+        /// a comparison between them is a comparison of the maths, not of two different scenes.
+        /// </summary>
+        public readonly struct View
+        {
+            public readonly P3 Camera, Forward, Right, Up;
+            public readonly float UCentre, VCentre, Across, Tall;
+
+            public View(P3 camera, P3 forward, P3 right, P3 up, float uCentre, float vCentre, float across, float tall)
+            {
+                Camera = camera; Forward = forward; Right = right; Up = up;
+                UCentre = uCentre; VCentre = vCentre; Across = across; Tall = tall;
+            }
+
+            /// <summary>The ray through a point in the rectangle, both 0..1 from one corner to the other.</summary>
+            public P3 At(float x, float y) =>
+                Normalise(Forward + Right * (UCentre + (x - 0.5f) * Across) + Up * (VCentre + (y - 0.5f) * Tall));
+        }
+
+        /// <summary>The rectangle a detector would draw around this body, seen from here.</summary>
+        public static View Framing(Body body, P3 camera, Options options = null)
         {
             var o = options ?? new Options();
-            var random = new Random(o.Seed);
             var forward = Normalise(body.Centre - camera);
+            // Strictly the viewer's LEFT in a left-handed frame, but the ray grid is symmetric about it, so the
+            // image is simply mirrored and everything downstream stays self-consistent. Named for its role.
             var right = Normalise(Cross(forward, new P3(0f, 1f, 0f)));
             var up = Cross(right, forward);
 
@@ -64,19 +87,32 @@ namespace CutOnce.Core.Tests
                 if (v < vMin) vMin = v;
                 if (v > vMax) vMax = v;
             }
-            if (uMin > uMax) return new List<P3>();
-            var uCentre = (uMin + uMax) * 0.5f;
-            var vCentre = (vMin + vMax) * 0.5f;
-            var across = (uMax - uMin) * (1f + o.Margin);
-            var tall = (vMax - vMin) * (1f + o.Margin);
+            if (uMin > uMax) return new View(camera, forward, right, up, 0f, 0f, 0f, 0f);
+            return new View(camera, forward, right, up,
+                (uMin + uMax) * 0.5f, (vMin + vMax) * 0.5f,
+                (uMax - uMin) * (1f + o.Margin), (vMax - vMin) * (1f + o.Margin));
+        }
 
+        /// <summary>
+        /// How far along this ray the first surface is, or 0 for open air. The scene's only sensor: the depth
+        /// pipeline reads it through a grid of rays, the old locator reads it through nine, and neither gets to see
+        /// anything the other cannot.
+        /// </summary>
+        public static float Range(Body body, P3 from, P3 direction, Options options = null) =>
+            Nearest(body, from, direction, options ?? new Options());
+
+        /// <summary>The patch a headset would hand the fitter, and the viewer it was seen from.</summary>
+        public static List<P3> Patch(Body body, P3 camera, Options options = null)
+        {
+            var o = options ?? new Options();
+            var random = new Random(o.Seed);
+            var view = Framing(body, camera, o);
+            if (view.Across <= 0f) return new List<P3>();
             var points = new List<P3>(o.Pixels * o.Pixels);
             for (var iy = 0; iy < o.Pixels; iy++)
                 for (var ix = 0; ix < o.Pixels; ix++)
                 {
-                    var u = uCentre + (ix / (float)(o.Pixels - 1) - 0.5f) * across;
-                    var v = vCentre + (iy / (float)(o.Pixels - 1) - 0.5f) * tall;
-                    var direction = Normalise(forward + right * u + up * v);
+                    var direction = view.At(ix / (float)(o.Pixels - 1), iy / (float)(o.Pixels - 1));
                     var t = Nearest(body, camera, direction, o);
                     if (t <= 0f) continue;
                     t += (float)(random.NextDouble() - 0.5) * 2f * o.NoiseM;
@@ -126,7 +162,11 @@ namespace CutOnce.Core.Tests
             return tMin <= tMax;
         }
 
-        /// <summary>An upright cylinder: a circle in plan, capped by its height.</summary>
+        /// <summary>
+        /// An upright cylinder: a circle in plan, capped by its height. Only the SIDE is solid — a ray that clears
+        /// the cap passes through, so a bottle viewed steeply from above shows no top. Good enough while the eye is
+        /// near the objects' own height, which is where build mode looks.
+        /// </summary>
         static float Cylinder(Body body, P3 from, P3 direction)
         {
             var radius = Math.Max(body.Size.X, body.Size.Z) * 0.5f;
@@ -144,20 +184,22 @@ namespace CutOnce.Core.Tests
             return Math.Abs(y - body.Centre.Y) <= body.Size.Y * 0.5f ? t : 0f;
         }
 
+        // The scene turns bodies with the SAME maths the fit uses to read a turn back. Keeping a second copy here is
+        // how the two conventions drifted apart once already: the fit reported atan2's angle, the scene built Unity's,
+        // and a box came back mirrored.
         static P3 Turn(P3 v, float yawDeg)
         {
             var r = yawDeg * (float)Math.PI / 180f;
-            float cos = (float)Math.Cos(r), sin = (float)Math.Sin(r);
-            return new P3(v.X * cos + v.Z * sin, v.Y, -v.X * sin + v.Z * cos);
+            return BoxMath.FromBoxFrame(v.X, v.Y, v.Z, (float)Math.Cos(r), (float)Math.Sin(r));
         }
 
         static float Dot(P3 a, P3 b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
 
         static P3 Unturn(P3 v, float yawDeg)
         {
-            var r = -yawDeg * (float)Math.PI / 180f;
-            float cos = (float)Math.Cos(r), sin = (float)Math.Sin(r);
-            return new P3(v.X * cos + v.Z * sin, v.Y, -v.X * sin + v.Z * cos);
+            var r = yawDeg * (float)Math.PI / 180f;
+            BoxMath.ToBoxFrame(v, (float)Math.Cos(r), (float)Math.Sin(r), out var u, out var w);
+            return new P3(u, v.Y, w);
         }
 
         static P3 Cross(P3 a, P3 b) => new P3(a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X);

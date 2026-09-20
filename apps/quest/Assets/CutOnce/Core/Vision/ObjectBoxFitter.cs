@@ -45,7 +45,12 @@ namespace CutOnce.Core.Vision
         public float TrimLow = 0.02f, TrimHigh = 0.98f;
         /// <summary>Points further than this from the viewer are another room, not this object.</summary>
         public float MaxReachM = 5f;
-        /// <summary>The chosen cluster must hold this share of the patch, or the detection was mostly background.</summary>
+        /// <summary>
+        /// What counts as a substantial share of the patch. Used twice, for the same idea: the chosen cluster must
+        /// hold this much or the detection was mostly background, and what survives the support cut must hold this
+        /// much or the object could not be told apart from the surface under it. Both shares are of the points that
+        /// remain at that stage, not of the raw patch.
+        /// </summary>
         public float MinShare = 0.10f;
         /// <summary>Points for full geometric confidence.</summary>
         public float PointsForFullConfidence = 60f;
@@ -115,11 +120,24 @@ namespace CutOnce.Core.Vision
         /// holograms, and a box around a judge reads as surveillance, not as a build assistant. The rest are the room
         /// itself — furniture is not build material, and its boxes are the ones that swallow the view.
         /// </summary>
+        /// <summary>
+        /// EXACTLY as the model spells them, which is darknet's COCO list in Vision/Resources/SentisYoloClasses.txt —
+        /// `sofa`, not `couch`; `diningtable`, not `dining table`. A name that is merely close matches nothing and the
+        /// class sails through the filter, which is why NamesMatchTheModel pins this list to that file.
+        /// </summary>
         static readonly HashSet<string> Never = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "person", "chair", "couch", "bed", "dining table", "toilet", "tv", "refrigerator", "oven", "microwave",
-            "sink", "door", "bench", "potted plant", "car", "bus", "train", "truck", "boat", "aeroplane", "bicycle", "motorbike",
+            "person", "chair", "sofa", "bed", "diningtable", "toilet", "tvmonitor", "refrigerator", "oven",
+            "microwave", "toaster", "sink", "bench", "pottedplant",
+            "car", "bus", "train", "truck", "boat", "aeroplane", "bicycle", "motorbike",
         };
+
+        /// <summary>Every name this file knows, so a test can hold them against the model's own label list.</summary>
+        public static IEnumerable<string> AllKnownNames()
+        {
+            foreach (var name in Table.Keys) yield return name;
+            foreach (var name in Never) yield return name;
+        }
 
         public static bool Ignored(string className) => className != null && Never.Contains(className);
 
@@ -174,12 +192,22 @@ namespace CutOnce.Core.Vision
     /// </summary>
     public static class ObjectBoxFitter
     {
+        // ALLOCATION: a fit allocates its working buffers — roughly 30-60 KB for a 576-point patch. That is fine at
+        // scan rate and would NOT be fine per frame, so the caller must keep this off the frame loop and spread a
+        // room's objects across cycles rather than fitting a dozen in one. If the wiring ever needs it tighter, the
+        // buffers below are the ones to pool, and the patch the caller builds is larger than all of them together.
         static readonly FitOptions Defaults = new FitOptions();
+
+        /// <summary>How much of its width a round object's measured depth must reach before the unseen half is completed.</summary>
+        const float RoundEnough = 0.3f;
 
         public static FitResult Fit(IReadOnlyList<P3> patch, P3 viewer, SizePrior prior, FitOptions options = null)
         {
             var o = options ?? Defaults;
             if (patch == null || patch.Count == 0) return FitResult.Rejected("no depth in the detection");
+            // NaN compares false against every bound, so an unchecked bad pose lets the whole patch through as
+            // "usable" and the fit dies sixty lines later blaming the speckle filter.
+            if (!viewer.IsFinite) return FitResult.Rejected("the viewer's pose is not a number");
 
             // 1. Only real, reachable points.
             var valid = new List<P3>(patch.Count);
@@ -246,6 +274,14 @@ namespace CutOnce.Core.Vision
             var kept = new List<P3>(chosen.Count);
             foreach (var i in chosen)
                 if (NeighbourCells(cells, keys[i]) >= o.MinNeighbourCells) kept.Add(valid[i]);
+            // A filter that takes most of the cluster is not removing speckle, it is removing the object. That
+            // happens once the cell has grown to the size of the thing being measured, so every cell is a boundary
+            // cell — a 12 cm object at four metres used to vanish outright, or come back two voxels short.
+            if (kept.Count * 2 < chosen.Count)
+            {
+                kept.Clear();
+                foreach (var i in chosen) kept.Add(valid[i]);
+            }
             if (kept.Count < o.MinPoints) return FitResult.Rejected($"only {kept.Count} points survived the speckle filter", kept.Count);
 
             // 5. The box. Height from the up axis, turn and footprint from the smallest enclosing rectangle.
@@ -257,10 +293,15 @@ namespace CutOnce.Core.Vision
 
             // Something standing on a surface reaches down to it. Measuring only what survived the support cut reads
             // a laptop as 1 cm thick and floats it half a centimetre above the desk.
-            if (support.HasValue && yHigh > support.Value && yLow - support.Value < o.SupportSnapM)
+            // Only ever DOWN to the surface. Without the lower bound, a cluster that straddles the plane — a bag
+            // hanging over the desk edge, or an MRUK plane reported a few centimetres high — has its floor RAISED,
+            // and a 44 cm backpack comes back 25 cm tall at full confidence.
+            if (support.HasValue && yHigh > support.Value && yLow >= support.Value && yLow - support.Value < o.SupportSnapM)
                 yLow = support.Value;
 
-            var yaw = BoxMath.MinAreaYawDeg(BoxMath.HullXz(kept), kept, voxel);
+            var hull = BoxMath.HullXz(kept);
+            if (hull.Count < 3) return FitResult.Rejected("the footprint is a line, so it has no turn to measure", kept.Count);
+            var yaw = BoxMath.MinAreaYawDeg(hull, kept, voxel);
             var radians = yaw * (float)Math.PI / 180f;
             float cos = (float)Math.Cos(radians), sin = (float)Math.Sin(radians);
             var us = new List<float>(kept.Count);
@@ -282,12 +323,17 @@ namespace CutOnce.Core.Vision
 
             // One viewpoint sees an object's near half only, so the extent along the view is short by about half. For a
             // class that is round in plan the missing half is not a guess: a circle's footprint is as deep as it is wide.
-            if (prior.Round)
+            var widest = Math.Max(size.X, size.Z);
+            var narrowest = Math.Min(size.X, size.Z);
+            // …but only where what was measured could BE the near half of a circle. Half a circle is about half as
+            // deep as it is wide; a flat face is a sliver. Inflating a sliver manufactures exactly the dimension the
+            // plausibility check below exists to police — a 12 x 10 x 0.5 cm patch of wall became a confident 12 cm
+            // "cup" — so a sliver is left as measured and the check then throws it out.
+            if (prior.Round && narrowest >= widest * RoundEnough)
             {
-                var widest = Math.Max(size.X, size.Z);
                 // Widening alone would grow the box backwards AND forwards, leaving its centre on the near surface.
                 // The centre belongs at the circle's centre, half the missing depth further from the eye.
-                var shortfall = widest - Math.Min(size.X, size.Z);
+                var shortfall = widest - narrowest;
                 var awayX = centre.X - viewer.X;
                 var awayZ = centre.Z - viewer.Z;
                 var flat = (float)Math.Sqrt((double)awayX * awayX + (double)awayZ * awayZ);
@@ -302,11 +348,11 @@ namespace CutOnce.Core.Vision
             Array.Sort(sorted);
             float shortest = sorted[0], middle = sorted[1], longest = sorted[2];
             if (longest < prior.LongestMinM || longest > prior.LongestMaxM)
-                return FitResult.Rejected($"{longest * 100:0.#} cm across is not a {prior.Name} ({prior.LongestMinM * 100:0.#}–{prior.LongestMaxM * 100:0.#} cm)", kept.Count);
+                return FitResult.Rejected($"{longest * 100:0.#} cm across does not match {prior.Name} ({prior.LongestMinM * 100:0.#}–{prior.LongestMaxM * 100:0.#} cm)", kept.Count);
             if (middle < prior.MidMinM || middle > prior.MidMaxM)
-                return FitResult.Rejected($"{middle * 100:0.#} cm wide is not a {prior.Name} ({prior.MidMinM * 100:0.#}–{prior.MidMaxM * 100:0.#} cm)", kept.Count);
+                return FitResult.Rejected($"{middle * 100:0.#} cm wide does not match {prior.Name} ({prior.MidMinM * 100:0.#}–{prior.MidMaxM * 100:0.#} cm)", kept.Count);
             if (shortest < prior.ShortestMinM || shortest > prior.ShortestMaxM)
-                return FitResult.Rejected($"{shortest * 100:0.#} cm thick is not a {prior.Name} ({prior.ShortestMinM * 100:0.#}–{prior.ShortestMaxM * 100:0.#} cm)", kept.Count);
+                return FitResult.Rejected($"{shortest * 100:0.#} cm thick does not match {prior.Name} ({prior.ShortestMinM * 100:0.#}–{prior.ShortestMaxM * 100:0.#} cm)", kept.Count);
 
             // 7. Geometric confidence: how much was measured, and how much of the detection was actually this object.
             var share = (float)kept.Count / valid.Count;
@@ -359,26 +405,31 @@ namespace CutOnce.Core.Vision
         /// </summary>
         static float SampleSpacing(List<P3> points)
         {
-            const int probes = 48, against = 220;
+            const int probes = 32;
             var n = points.Count;
             if (n < 4) return 0f;
+            // A few probes against EVERY point. Subsampling the inner loop too would measure the gaps of a coarser
+            // grid than the data, and would answer differently depending on how the caller happened to order the
+            // cloud, because the stride can fall in step with the rows.
             var step = Math.Max(1, n / probes);
-            var other = Math.Max(1, n / Math.Min(n, against));
             var gaps = new List<float>();
             for (var i = 0; i < n; i += step)
             {
                 var nearest = float.MaxValue;
-                for (var j = 0; j < n; j += other)
+                for (var j = 0; j < n; j++)
                 {
                     if (j == i) continue;
-                    var d = (points[j] - points[i]).Length;
+                    var dx = points[j].X - points[i].X;
+                    var dy = points[j].Y - points[i].Y;
+                    var dz = points[j].Z - points[i].Z;
+                    var d = dx * dx + dy * dy + dz * dz;          // squared: the square root is worth paying once
                     if (d < nearest) nearest = d;
                 }
                 if (nearest < float.MaxValue) gaps.Add(nearest);
             }
             if (gaps.Count == 0) return 0f;
             gaps.Sort();
-            return BoxMath.Percentile(gaps, 0.5f);
+            return (float)Math.Sqrt(BoxMath.Percentile(gaps, 0.5f));
         }
 
         static float MedianDistance(List<P3> points, P3 viewer)
@@ -391,6 +442,9 @@ namespace CutOnce.Core.Vision
 
         static float Clamp(float v, float low, float high) => v < low ? low : v > high ? high : v;
 
+        // Three 21-bit cell coordinates in one long. Negative coordinates wrap, and so do their neighbours in Shift,
+        // which is harmless because the wrap is consistent: two cells only collide 2^21 apart, some 40 km at these
+        // sizes. The packing is what keeps clustering to dictionary lookups instead of a spatial tree.
         static long CellKey(P3 p, float voxel)
         {
             var x = (long)Math.Floor(p.X / voxel);
