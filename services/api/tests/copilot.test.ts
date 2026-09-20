@@ -132,6 +132,26 @@ describe("fast path", () => {
     expect(matchFastPath("scan the table", input({ mode: "overlay" }))?.action).toEqual({ type: "start_scan" });
   });
 
+  it("reads the active build instruction and highlights its parts when asked", () => {
+    const state = t.app.ctx.store.getState(currentId());
+    const design = { ...plan(), plan_id: "plan_build_01k5" };
+    const step = design.steps.find((candidate) => candidate.step_id === state.current_step_id)!;
+    for (const said of ["How do I build it?", "Read me the instructions", "What do I do next?", "Walk me through this"]) {
+      expect(matchFastPath(said, input({ mode: "build", plan: design, buildShowing: true }))).toEqual({
+        action: null,
+        answer_text: `Step ${step.index} of ${design.steps.length}. ${step.instruction}`,
+        highlight_parts: step.part_ids,
+      });
+    }
+  });
+
+  it("never reads instructions from the old hidden run while scanning or choosing a design", () => {
+    const design = { ...plan(), plan_id: "plan_build_01k5" };
+    const fast = matchFastPath("How do I build it?", input({ mode: "build", plan: design, buildShowing: false }));
+    expect(fast).toMatchObject({ action: null, highlight_parts: [] });
+    expect(fast?.answer_text).toMatch(/Nothing is being built yet/);
+  });
+
   it("holds back 'done' and 'undo' while build mode is hiding the run: they would change a build nobody can see", () => {
     // Fresh session, nothing scanned: build mode hides the hologram while you look around and pick, and the run
     // underneath is whatever was built last. On a headset this answered "Done. Next: stand the tall can C upright"

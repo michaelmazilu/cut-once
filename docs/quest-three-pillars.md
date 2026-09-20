@@ -23,6 +23,8 @@ pink/one-eye/invisible passthrough materials, or the scanner remaining paused af
 - A Copilot created at runtime or already placed in a scene receives the current runtime server URL/token, `CutOnceApp`
   host, platform camera source, push-to-talk input, microphone, and PCM speaker before its first `Update`.
 - Press A to start listening, press again to send. Text must appear even when the camera or TTS is unavailable.
+- During an active generated build, asking how to build it or requesting the instructions must return the authoritative
+  current plan step, keep that step's objects highlighted, and read the instruction through Kit's normal TTS stream.
 - The request budget must include audio/frame upload, the server's hard cap, and tunnel latency. A stalled audio stream
   must end safely without suppressing the text response.
 - On a physical Quest, a pushed persistent config must override the Editor's bundled config. `127.0.0.1` without an ADB

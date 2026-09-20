@@ -17,6 +17,14 @@ describe("Quest three-pillar regression gate", () => {
     expect(problems.map(p => p.id)).toContain("P2-VISION-FALLBACK");
   });
 
+  it("fails if Kit stops reading and highlighting the active build instruction on request", () => {
+    const problems = pillarProblems(undefined, path => {
+      const source = readFileSync(path, "utf8");
+      return path.endsWith("fastpath.ts") ? source.replace("highlight_parts: step.part_ids", "highlight_parts: []") : source;
+    });
+    expect(problems.map(p => p.id)).toContain("P1-BUILD-INSTRUCTIONS");
+  });
+
   it("fails if accepted scans stop recovering missed blueprint messages", () => {
     const problems = pillarProblems(undefined, path => {
       const source = readFileSync(path, "utf8");
