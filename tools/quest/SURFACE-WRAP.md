@@ -89,6 +89,17 @@ the same sRGB RenderTexture format used by the camera, including padding,
 orientation, colours and inverse coordinates. A camera-format test buffer is
 still synthetic input, not evidence that the physical camera works.
 
+Measured letterbox result: commit `91eb7e2`, Actions run `35498191832`.
+All 228 EditMode tests, the numeric RGB check, all 18 letterbox colour/padding
+probes, all six inverse-coordinate checks, and the blank negative control passed.
+Photo 146489 now finds the bottle at 0.413 confidence / 0.943 IoU and the dining
+table at 0.419 confidence / 0.824 IoU, identically across three runs. Photo 160012
+still misses both at the scanner threshold (best raw scores: bottle 0.293,
+table 0.185). **Overall recognition acceptance remains failing: one of two
+photos passes.** The workflow did not build a new APK from this revision.
+Do not substitute these Mac timings or recorded-image results for a live Quest
+camera, stereo registration or frame-rate test; the headset was disconnected.
+
 Photo URLs, SHA-256 digests, original Flickr sources and CC BY 2.0 license links
 are recorded in `tools/quest/fixtures/recognition-coco.json`. Inputs are downloaded
 only for the explicit recognition-proof command; photos are not shipped in the APK.
