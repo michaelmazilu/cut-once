@@ -52,6 +52,9 @@ export function KitchenPage() {
   const live = useRef({ ideas, twins, run, plan, state });
   live.current = { ideas, twins, run, plan, state };
   const recording = useRef<Recording | null>(null);
+  /** A scan in flight, and where the last one was taken from: the room scans itself again once you have looked elsewhere. */
+  const scanning = useRef(false);
+  const lastScan = useRef<{ at: number; from: THREE.Vector3; look: THREE.Vector3 } | null>(null);
 
   // ── the 3D world: the kitchen (the room) and, drawn over it, the holograms ──────────────────────────────────
   useEffect(() => {
@@ -215,7 +218,9 @@ export function KitchenPage() {
   // ── scanning and asking ───────────────────────────────────────────────────────────────────────────────────────
   const scan = useCallback(async () => {
     const w = world.current;
-    if (!w) return;
+    if (!w || scanning.current) return;
+    scanning.current = true;
+    lastScan.current = { at: Date.now(), from: w.camera.position.clone(), look: w.camera.getWorldDirection(new THREE.Vector3()) };
     setStatus({ kind: "busy", text: "Scanning the kitchen…" });
     try {
       const { upload } = await w.rig.scan(w.room, w.camera, w.depthInvisible, { sessionId: session.current });
@@ -223,7 +228,29 @@ export function KitchenPage() {
       session.current = accepted.session_id;
       setStatus({ kind: "busy", text: "Scan sent. Finding objects…" });
     } catch (e) { setStatus({ kind: "error", text: `Scan: ${describeError(e)}` }); }
+    finally { scanning.current = false; }
   }, []);
+
+  /**
+   * The room looks after itself: it scans when you arrive, and again when you have looked somewhere else for long
+   * enough. On the headset this is what the room scanner does every frame; here a scan costs a photo, a depth pass and
+   * a naming call, so it waits for the view to actually move (25 cm or 20°) and never runs while a build is on screen,
+   * whose pieces are placed against the objects the last scan found.
+   */
+  useEffect(() => {
+    const MOVED_M = 0.25, TURNED = Math.cos(THREE.MathUtils.degToRad(20)), COOL_MS = 20_000;
+    const timer = window.setInterval(() => {
+      const w = world.current;
+      if (!w || scanning.current || live.current.plan?.parts.length) return;
+      const last = lastScan.current;
+      if (!last) { void scan(); return; }                                   // nothing seen yet: look once, so the room is never blank
+      if (Date.now() - last.at < COOL_MS) return;
+      const look = w.camera.getWorldDirection(new THREE.Vector3());
+      if (w.camera.position.distanceTo(last.from) < MOVED_M && look.dot(last.look) > TURNED) return;
+      void scan();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [scan]);
 
   /** A spoken question (`audio`), or a typed one (`question`). */
   const ask = useCallback(async (audio: Blob | null, question?: string) => {
@@ -327,7 +354,7 @@ export function KitchenPage() {
           <button type="submit" disabled={!typed.trim()}>Ask</button>
         </form>
         <div className="kitchen-actions">
-          <button type="button" className="primary" onClick={() => void scan()}>Scan (S)</button>
+          <button type="button" className="primary" onClick={() => void scan()}>Look again (S)</button>
           <button type="button" onClick={() => void startOver()}>Start over</button>
         </div>
       </aside>

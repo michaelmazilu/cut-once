@@ -12,6 +12,8 @@ namespace CutOnce.Vision
         public float confidence;
         public Vector3 worldPosition;          // newest raw measurement
         public Vector3 smoothedWorldPosition;  // what the visuals follow
+        public Vector3 worldSize = new Vector3(0.25f, 0.25f, 0.25f);          // newest raw estimate
+        public Vector3 smoothedWorldSize = new Vector3(0.25f, 0.25f, 0.25f);  // what the highlight is scaled to
         public float lastSeenTime;
         public int consecutiveHits;
         public int totalHits;
@@ -58,8 +60,12 @@ namespace CutOnce.Vision
         private readonly List<TrackedObject> _objects = new();
         private int _nextId = 1;
 
-        /// <summary>Fold one located detection into the tracked set.</summary>
+        /// <summary>Older callers and diagnostics: position only, a box-ish default size.</summary>
         public TrackedObject Observe(in DetectedObject detection, Vector3 world)
+            => Observe(detection, world, new Vector3(0.25f, 0.25f, 0.25f));
+
+        /// <summary>Fold one located detection into the tracked set.</summary>
+        public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize)
         {
             var now = Time.time;
             var match = FindNearest(detection.classId, world);
@@ -73,6 +79,8 @@ namespace CutOnce.Vision
                     className = detection.className,
                     worldPosition = world,
                     smoothedWorldPosition = world,
+                    worldSize = worldSize,
+                    smoothedWorldSize = worldSize,
                 };
                 _objects.Add(match);
             }
@@ -82,8 +90,14 @@ namespace CutOnce.Vision
                 // not the object teleporting. Count the sighting, ignore the position.
                 var jumped = Vector3.Distance(match.smoothedWorldPosition, world) > jumpRejectDistance;
                 match.worldPosition = world;
+                match.worldSize = worldSize;
                 if (!jumped)
+                {
                     match.smoothedWorldPosition = Vector3.Lerp(match.smoothedWorldPosition, world, positionSmoothing);
+                    // Size rides the same smoothing and the same jump gate: a bad depth batch mis-sizes
+                    // exactly when it mis-places, so both are rejected together.
+                    match.smoothedWorldSize = Vector3.Lerp(match.smoothedWorldSize, worldSize, positionSmoothing);
+                }
             }
 
             match.className = detection.className;

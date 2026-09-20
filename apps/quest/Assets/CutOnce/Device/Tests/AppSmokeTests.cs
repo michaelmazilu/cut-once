@@ -61,7 +61,9 @@ namespace CutOnce.Device.PlayTests
                 Assert.That(assembly.Views.Count, Is.EqualTo(0), "the app ships no plan: nothing is drawn until Kit builds something");
                 Assert.That(UnityEngine.Object.FindAnyObjectByType<HudController>(), Is.Not.Null);
                 var status = GameObject.Find("[HUD]").transform.Find("status").GetComponent<UnityEngine.UI.Text>().text;
-                Assert.That(status, Does.Contain("What can I build?"));
+                // Nothing is built, so the HUD's job is to say how to start: one button, and Kit does the rest.
+                Assert.That(status, Does.Contain("A"), "the idle HUD must name the button that talks to Kit");
+                Assert.That(status, Is.EqualTo(type.GetField("IdleHint").GetValue(null)));
                 UnityEngine.Object.Destroy(go);
             }
         }

@@ -47,6 +47,10 @@ namespace CutOnce.Vision
         public float minDistance = 0.2f;   // Quest depth is unreliable closer than this
         public float maxDistance = 6f;     // official guidance: limited accuracy beyond ~4m
 
+        [Tooltip("No estimated object dimension leaves this range: a mis-depthed bottle must never become a room-sized cube.")]
+        public float minSizeM = 0.05f;
+        public float maxSizeM = 1.2f;
+
         [Tooltip("Used only where there is no depth sensing (running from the Editor over Link): how far down the ray to put an object the room's own planes did not catch.")]
         public float fallbackDistance = 2f;
 
@@ -55,6 +59,7 @@ namespace CutOnce.Vision
         public string LastFailureReason { get; private set; } = "";
 
         private VisionCamera _camera;
+        private Vector2 _lastInputSize = new Vector2(640f, 640f);
         private EnvironmentRaycastManager _raycast;
         private readonly List<float> _distances = new();
 
@@ -95,23 +100,37 @@ namespace CutOnce.Vision
 
         bool _warnedNoDepth;
 
-        /// <summary>
-        /// World position of a detection, or false if the room did not answer. <paramref name="cameraPose"/>
-        /// must be the pose captured with the frame the detection came from.
-        /// </summary>
+        /// <summary>Position only; size discarded. Kept because diagnostics and older callers use it.</summary>
         public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world)
+            => TryLocate(detection, cameraPose, out world, out _);
+
+        /// <summary>
+        /// World position AND estimated world size of a detection, or false if the room did not answer.
+        /// <paramref name="cameraPose"/> must be the pose captured with the frame the detection came from.
+        ///
+        /// The size comes from the same two facts the position does: the detection's pixel box and the
+        /// depth the samples agreed on. Rays through the box's edge midpoints, cut at that depth, give
+        /// width and height in metres; depth extent is taken as the smaller of the two (a bottle is
+        /// roughly as deep as it is wide; nothing useful is deeper than it is big). Everything is
+        /// clamped to [minSizeM, maxSizeM] so one wall-hit sample can never produce a giant cube.
+        /// </summary>
+        public bool TryLocate(in DetectedObject detection, Pose cameraPose, out Vector3 world, out Vector3 size)
         {
             world = default;
+            size = new Vector3(0.25f, 0.25f, 0.25f);
             LastAttempts++;
             var box = detection.boundingBox;
-            var size = detection.inputSize;
-            if (size.x <= 0f || size.y <= 0f) { LastFailureReason = "bad input size"; return false; }
+            var input = detection.inputSize;
+            if (input.x <= 0f || input.y <= 0f) { LastFailureReason = "bad input size"; return false; }
+            _lastInputSize = input;
 
-            var centreRay = RayThrough(box.center, size, cameraPose);
+            var centreRay = RayThrough(box.center, input, cameraPose);
             if (_raycast == null)                                    // no depth sensing: the room's surfaces instead of nothing at all
             {
                 LastSuccesses++;
-                return LocateWithoutDepth(centreRay, out world);
+                var placed = LocateWithoutDepth(centreRay, out world);
+                if (placed) size = SizeAt(Vector3.Distance(cameraPose.position, world), box, size, cameraPose);
+                return placed;
             }
             var forward = cameraPose.rotation * Vector3.forward;
 
@@ -158,10 +177,33 @@ namespace CutOnce.Vision
             var cosine = Vector3.Dot(centreRay.direction, forward);
             if (cosine < 0.1f) { LastFailureReason = "detection too far off-axis to place"; return false; }
             world = centreRay.GetPoint(depthAt / cosine);
+            size = SizeAt(depthAt / cosine, box, size, cameraPose);
             LastSuccesses++;
             LastFailureReason = "";
             return true;
         }
+
+        /// <summary>
+        /// The box's world size at a given distance along the view: rays through the edge midpoints,
+        /// cut at that distance, measured against each other. Uses the same camera model as the
+        /// position, so the size is consistent with where the object was placed.
+        /// </summary>
+        private Vector3 SizeAt(float distance, Rect box, Vector2 inputSize, Pose cameraPose)
+        {
+            var left = RayThrough(new Vector2(box.xMin, box.center.y), inputSize, cameraPose).GetPoint(distance);
+            var right = RayThrough(new Vector2(box.xMax, box.center.y), inputSize, cameraPose).GetPoint(distance);
+            var top = RayThrough(new Vector2(box.center.x, box.yMin), inputSize, cameraPose).GetPoint(distance);
+            var bottom = RayThrough(new Vector2(box.center.x, box.yMax), inputSize, cameraPose).GetPoint(distance);
+            var width = Mathf.Clamp(Vector3.Distance(left, right), minSizeM, maxSizeM);
+            var height = Mathf.Clamp(Vector3.Distance(top, bottom), minSizeM, maxSizeM);
+            // Depth is the one axis the camera cannot see. The smaller footprint axis is the best
+            // stand-in, and it is capped harder: a dining table is wide but never a metre thick.
+            var depth = Mathf.Clamp(Mathf.Min(width, height), minSizeM, 0.6f);
+            return new Vector3(width, height, depth);
+        }
+
+        private Vector3 SizeAt(float distance, Rect box, Vector3 fallback, Pose cameraPose)
+            => _camera != null ? SizeAt(distance, box, _lastInputSize, cameraPose) : fallback;
 
         /// <summary>Box pixel (top-left origin) -> viewport (bottom-left origin) -> world ray. The y flip is mandatory.</summary>
         private Ray RayThrough(Vector2 pixel, Vector2 inputSize, Pose cameraPose)
