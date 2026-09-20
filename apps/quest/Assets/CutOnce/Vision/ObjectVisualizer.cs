@@ -3,137 +3,82 @@ using UnityEngine;
 namespace CutOnce.Vision
 {
     /// <summary>
-    /// The smart-glasses look: the room is just the room, and a recognised object wears a subtle
-    /// blue highlight with a small name above it. Nothing else is drawn.
+    /// Compact, sentence-case labels. Approximate detection boxes are an opt-in diagnostic.
     ///
-    /// The highlight is the app's own hologram shader (thin pixel-width edges, faint fill — the
-    /// same look as Kit's designs), NOT RoomSense's grid material: grids read as "debug view", and
-    /// this must read as "your glasses recognised the bottle". Two intensities:
-    ///   - recognised: corner brackets only, barely-there fill — present, never loud;
-    ///   - focused (the one being looked at): full thin edges, slightly stronger fill.
-    /// The box is scaled to the tracked object's SMOOTHED estimated size (from the detection box
-    /// and the depth samples), so a bottle gets a bottle-sized highlight, not a default cube.
+    /// Reuses RoomSense's SheikahGlow material (loaded from Resources so the shader survives player
+    /// build stripping — a shader only reached via Shader.Find can be dropped, giving a pink object
+    /// on device that looked perfect in the Editor). The NAME never comes from RoomSense: it is
+    /// whatever the vision model called the thing.
     ///
-    /// Everything follows the tracked object's smoothed pose, never the raw per-frame measurement,
+    /// Visuals follow the tracked object's SMOOTHED position, never the raw per-frame measurement,
     /// which is the difference between a label that sits on the bottle and one that vibrates.
-    /// In VisionDebug mode the label gains the numbers (confidence, id, size); nothing else changes.
     /// </summary>
     public class ObjectVisualizer : MonoBehaviour
     {
-        [Header("Recognised (every visible object)")]
-        public Color edgeColour = new Color(0.30f, 0.64f, 1f);      // #4DA3FF, the palette's blue
-        [Range(0f, 1f)] public float edgeAlpha = 0.5f;
-        [Range(0f, 1f)] public float fillAlpha = 0.04f;
-        public float edgeWidthPx = 1.5f;
-
-        [Header("Focused (the one being looked at)")]
-        public Color focusEdgeColour = new Color(0.40f, 0.91f, 0.98f); // #67E8F9, brighter cyan
-        [Range(0f, 1f)] public float focusEdgeAlpha = 0.85f;
-        [Range(0f, 1f)] public float focusFillAlpha = 0.10f;
-        public float focusEdgeWidthPx = 2f;
-
-        [Header("Label")]
-        public float labelGap = 0.04f;      // metres above the top of the highlight
+        public Material glowMaterial;
+        public Color highlightColour = new Color(0.25f, 0.75f, 1f, 0.55f);
+        public Vector3 defaultSize = new Vector3(0.28f, 0.28f, 0.28f);
+        public float labelHeight = 0.08f;
         public float labelSize = 0.0035f;
+        public bool showConfidence;
+        public bool showBounds;
 
         [Tooltip("How fast visuals catch up to the tracked position, in metres/second of lerp.")]
         public float followSpeed = 8f;
 
-        private class Cached
-        {
-            public Transform transform, label;
-            public MeshRenderer highlight;
-            public TextMesh text, shadow;
-            public string lastName;
-            public bool lastFocused, lastDebug;
-            public float nextDebugRefresh;
-        }
-        private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _visuals = new();
+        private class Cached { public Transform transform; public TextMesh text, shadow; public string lastName; }
+        private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _labels = new();
         private Transform _camera;
-        private Material _material;
-        private MaterialPropertyBlock _props;
 
-        private static readonly int FillColor = Shader.PropertyToID("_FillColor");
-        private static readonly int EdgeColor = Shader.PropertyToID("_EdgeColor");
-        private static readonly int EdgeWidthPxId = Shader.PropertyToID("_EdgeWidthPx");
-        private static readonly int Brackets = Shader.PropertyToID("_Brackets");
-        private static readonly int Grid = Shader.PropertyToID("_Grid");
-        private static readonly int PulseHz = Shader.PropertyToID("_PulseHz");
-        private static readonly int EdgeMode = Shader.PropertyToID("_EdgeMode");
-        private static readonly int HalfSize = Shader.PropertyToID("_HalfSize");
-        private static readonly int RevealY = Shader.PropertyToID("_RevealY");
+        private static readonly int TintId = Shader.PropertyToID("_Tint");
+        private static readonly int PulseRadiusId = Shader.PropertyToID("_PulseRadius");
 
         private void Awake()
         {
-            _props = new MaterialPropertyBlock();
-            // The hologram shader lives in Resources, so it survives build stripping; loading it here
-            // instead of referencing CutOnce.AR keeps the Vision assembly free-standing.
-            var shader = Resources.Load<Shader>("CutOnce/Hologram");
-            if (shader == null) shader = Shader.Find("CutOnce/Hologram");
-            if (shader == null)
-            {
-                Debug.LogError("[Vision] hologram shader missing; highlights will use a plain unlit look.");
-                shader = Shader.Find("Universal Render Pipeline/Unlit");
-            }
-            _material = new Material(shader) { name = "Vision highlight (shared)" };
+            if (glowMaterial == null) glowMaterial = Resources.Load<Material>("SheikahGlow");
+            if (glowMaterial == null)
+                Debug.LogWarning("[Vision] no glow material; detections will have labels but no highlight.");
         }
 
-        /// <summary>Create or update the visual for a tracked object. Focused = the one under the gaze.</summary>
-        public void Show(TrackedObject o, bool focused = false)
+        /// <summary>Create or update the visual for a tracked object.</summary>
+        public void Show(TrackedObject o)
         {
             if (o.visual == null) o.visual = Build(o);
             if (!o.visual.activeSelf) o.visual.SetActive(true);
-            if (!_visuals.TryGetValue(o.visual, out var cached)) return;
 
+            var target = o.smoothedWorldPosition;
             var t = o.visual.transform;
             // Lerp on top of the EMA: the EMA settles the measurement, this settles the rendering.
-            // The size goes on the CUBE, never the root: the label billboards, and a rotated child
-            // under a non-uniform scale shears its glyphs.
-            var follow = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
-            t.position = Vector3.Lerp(t.position, o.smoothedWorldPosition, follow);
-            var cube = cached.highlight.transform;
-            cube.localScale = Vector3.Lerp(cube.localScale, o.smoothedWorldSize, follow);
+            t.position = Vector3.Lerp(t.position, target, 1f - Mathf.Exp(-followSpeed * Time.deltaTime));
 
-            if (cached.lastFocused != focused)
+            // Cached on the visual: transform.Find by string plus a fresh interpolated string every
+            // frame, per tracked object, is a real per-frame cost on an XR2.
+            if (!_labels.TryGetValue(o.visual, out var cached))
             {
-                cached.lastFocused = focused;
-                Style(cached.highlight, focused);
+                var found = t.Find("Label");
+                if (found == null) return;
+                cached = new Cached { transform = found, text = found.GetComponent<TextMesh>() };
+                _labels[o.visual] = cached;
             }
+            var label = cached.transform;
 
-            // Rebuilt only when something changed (rule 10: no strings every frame). In debug mode the
-            // numbers refresh twice a second, which is plenty for reading and free the rest of the time.
-            var refreshLabel = cached.lastName != o.className
-                || cached.lastDebug != VisionDebug.Enabled
-                || (VisionDebug.Enabled && Time.time >= cached.nextDebugRefresh);
-            if (cached.text != null && refreshLabel)
+            if (cached.text != null && (showConfidence || cached.lastName != o.className))
             {
+                cached.text.text = showConfidence
+                    ? $"{o.className} · {o.confidence * 100f:0}%"
+                    : o.className;
                 cached.lastName = o.className;
-                cached.lastDebug = VisionDebug.Enabled;
-                cached.nextDebugRefresh = Time.time + 0.5f;
-                var wanted = LabelText(o);
-                cached.text.text = wanted;
-                if (cached.shadow != null) cached.shadow.text = wanted;
+                if (cached.shadow != null) cached.shadow.text = cached.text.text;
             }
-
-            // The label sits just above the highlight's top face, whatever size the object is.
-            cached.label.localPosition = new Vector3(0f, cube.localScale.y * 0.5f + labelGap, 0f);
 
             // Billboard: face the headset, upright, so text is never mirrored or tilted.
             if (_camera == null && Camera.main != null) _camera = Camera.main.transform;
             if (_camera != null)
             {
-                var away = cached.label.position - _camera.position;
+                var away = label.position - _camera.position;
                 away.y = 0f;
-                if (away.sqrMagnitude > 0.0001f) cached.label.rotation = Quaternion.LookRotation(away, Vector3.up);
+                if (away.sqrMagnitude > 0.0001f) label.rotation = Quaternion.LookRotation(away, Vector3.up);
             }
-        }
-
-        private string LabelText(TrackedObject o)
-        {
-            var name = string.IsNullOrEmpty(o.className) ? "object" : o.className.ToUpperInvariant();
-            if (!VisionDebug.Enabled) return name;
-            var s = o.smoothedWorldSize;
-            return $"{name} · {o.confidence * 100f:0}% · #{o.id} · {s.x * 100f:0}×{s.y * 100f:0}×{s.z * 100f:0} cm";
         }
 
         public void Hide(TrackedObject o)
@@ -144,29 +89,9 @@ namespace CutOnce.Vision
         public void Release(TrackedObject o)
         {
             if (o.visual == null) return;
-            _visuals.Remove(o.visual);
+            _labels.Remove(o.visual);
             Destroy(o.visual);
             o.visual = null;
-        }
-
-        private void Style(MeshRenderer renderer, bool focused)
-        {
-            if (renderer == null) return;
-            var edge = focused ? focusEdgeColour : edgeColour;
-            var fill = focused ? focusFillAlpha : fillAlpha;
-            renderer.GetPropertyBlock(_props);
-            _props.SetColor(FillColor, new Color(edge.r, edge.g, edge.b, fill));
-            _props.SetColor(EdgeColor, new Color(edge.r, edge.g, edge.b, focused ? focusEdgeAlpha : edgeAlpha));
-            _props.SetFloat(EdgeWidthPxId, focused ? focusEdgeWidthPx : edgeWidthPx);
-            // Brackets when merely recognised (a quiet reticle at the corners); full thin edges when
-            // focused. Never the grid: the grid is the debug look this class exists to retire.
-            _props.SetFloat(Brackets, focused ? 0f : 1f);
-            _props.SetFloat(Grid, 0f);
-            _props.SetFloat(PulseHz, 0f);
-            _props.SetFloat(EdgeMode, 1f);                            // box edge maths
-            _props.SetVector(HalfSize, new Vector4(0.5f, 0.5f, 0.5f, 0f)); // unit cube; world size comes from the transform
-            _props.SetFloat(RevealY, 1e6f);                           // no reveal wipe on highlights
-            renderer.SetPropertyBlock(_props);
         }
 
         private GameObject Build(TrackedObject o)
@@ -174,24 +99,36 @@ namespace CutOnce.Vision
             var root = new GameObject($"[Vision] {o.className}");
             root.transform.position = o.smoothedWorldPosition;
 
-            var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            box.name = "Highlight";
-            box.transform.SetParent(root.transform, false);
-            box.transform.localScale = o.smoothedWorldSize;
-            // An overlay must never eat a controller ray or a physics query. Destroy() is deferred to
-            // end of frame, so disable first — otherwise the collider is live for one frame.
-            var collider = box.GetComponent<Collider>();
-            if (collider != null) { collider.enabled = false; Destroy(collider); }
-            var renderer = box.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = _material;
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
+            if (showBounds && glowMaterial != null)
+            {
+                var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                box.name = "Highlight";
+                box.transform.SetParent(root.transform, false);
+                box.transform.localScale = defaultSize;
+                // An overlay must never eat a controller ray or a physics query. Destroy() is deferred to
+                // end of frame, so disable first — otherwise the collider is live for one frame.
+                var collider = box.GetComponent<Collider>();
+                if (collider != null) { collider.enabled = false; Destroy(collider); }
+
+                var renderer = box.GetComponent<MeshRenderer>();
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                if (glowMaterial != null)
+                {
+                    renderer.sharedMaterial = glowMaterial;
+                    var props = new MaterialPropertyBlock();
+                    props.SetColor(TintId, highlightColour);
+                    props.SetFloat(PulseRadiusId, 9999f);   // always visible; don't wait on RoomSense's pulse
+                    renderer.SetPropertyBlock(props);
+                }
+            }
 
             var labelGo = new GameObject("Label");
             labelGo.transform.SetParent(root.transform, false);
+            labelGo.transform.localPosition = new Vector3(0f, labelHeight, 0f);
 
             var text = labelGo.AddComponent<TextMesh>();
-            text.text = "";
+            text.text = o.className;
             text.characterSize = labelSize;
             text.fontSize = 48;
             text.anchor = TextAnchor.LowerCenter;
@@ -210,23 +147,19 @@ namespace CutOnce.Vision
             shadowGo.transform.SetParent(labelGo.transform, false);
             shadowGo.transform.localPosition = new Vector3(0.0007f, -0.0007f, 0.0003f);
             var shadow = shadowGo.AddComponent<TextMesh>();
-            shadow.font = text.font; shadow.fontSize = text.fontSize;
+            shadow.text = text.text; shadow.font = text.font; shadow.fontSize = text.fontSize;
             shadow.characterSize = text.characterSize; shadow.anchor = text.anchor;
             shadow.alignment = text.alignment; shadow.richText = false;
             shadow.color = new Color(0.02f, 0.03f, 0.03f, 1f);
             shadowGo.GetComponent<MeshRenderer>().sharedMaterial = text.GetComponent<MeshRenderer>().sharedMaterial;
-
-            var cached = new Cached { transform = root.transform, label = labelGo.transform, highlight = renderer, text = text, shadow = shadow };
-            _visuals[root] = cached;
-            Style(renderer, focused: false);
+            _labels[root] = new Cached { transform = labelGo.transform, text = text, shadow = shadow };
             return root;
         }
 
         private void OnDestroy()
         {
-            foreach (var pair in _visuals) if (pair.Key != null) Destroy(pair.Key);
-            _visuals.Clear();
-            if (_material != null) Destroy(_material);
+            foreach (var pair in _labels) if (pair.Key != null) Destroy(pair.Key);
+            _labels.Clear();
         }
     }
 }

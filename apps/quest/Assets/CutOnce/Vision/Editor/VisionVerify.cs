@@ -177,16 +177,12 @@ public static class VisionVerify
 
         var block = new MaterialPropertyBlock();
         renderer?.GetPropertyBlock(block);
-        // The highlight is the hologram shader now (thin edges + faint fill), not RoomSense's grid
-        // material: check the edge colour, and that the grid the old look used stays OFF.
-        var edge = renderer != null ? block.GetColor(Shader.PropertyToID("_EdgeColor")) : Color.black;
-        var grid = renderer != null ? block.GetFloat(Shader.PropertyToID("_Grid")) : 1f;
-        var isBlue = edge.b > edge.r && edge.b > 0.4f;
+        var tint = renderer != null ? block.GetColor(Shader.PropertyToID("_Tint")) : Color.black;
+        var isBlue = tint.b > tint.r && tint.b > 0.4f;
         var hCol = highlight != null ? highlight.GetComponent<Collider>() : null;
         var colliderInert = hCol == null || !hCol.enabled;
-        var sized = visual != null && visual.transform.localScale.x <= 1.21f; // locator clamps every axis
-        Check("SUBTLE HIGHLIGHT", highlight != null && renderer != null && isBlue && grid < 0.5f && colliderInert && sized,
-            $"shader={shaderName} edge={edge} grid={grid} colliderInert={colliderInert} scale={visual?.transform.localScale}");
+        Check("BLUE HIGHLIGHT", highlight != null && renderer != null && isBlue && colliderInert,
+            $"shader={shaderName} tint={tint} colliderInert={colliderInert}");
 
         var text = labelT != null ? labelT.GetComponent<TextMesh>() : null;
         Check("YOLO LABEL", text != null && text.text.Contains("CHAIR"),

@@ -97,10 +97,10 @@ namespace CutOnce.Vision
             foreach (var d in detections)
             {
                 if (d.confidence < minConfidence) continue;
-                if (!Locator.TryLocate(d, cameraPose, out var world, out var worldSize)) continue;
+                if (!Locator.TryLocate(d, cameraPose, out var world)) continue;
 
                 located++;
-                var tracked = Tracker.Observe(d, world, worldSize);
+                var tracked = Tracker.Observe(d, world);
                 _observed.Add(tracked.id);
 
                 if (shouldLog) Debug.Log($"Detected: {d.className} {d.confidence:0.00}  @ {world}");
@@ -161,39 +161,11 @@ namespace CutOnce.Vision
                 }
             }
             _focused = focus;
-
-            // The smart-glasses rule: every recognised object wears its subtle highlight and name;
-            // the one being looked at is brighter. Capped by distance so a busy room cannot fill the
-            // view (or the fill-rate budget) with see-through boxes.
-            var shown = 0;
             foreach (var o in Tracker.Objects)
             {
-                if (!o.visible) { Visualizer.Hide(o); continue; }
-                var head = _eye != null ? _eye.transform.position : Vector3.zero;
-                var near = Vector3.Distance(head, o.smoothedWorldPosition) <= maxHighlightDistance;
-                if (near && shown < maxHighlighted) { Visualizer.Show(o, o == focus); shown++; }
+                if (o == focus) Visualizer.Show(o);
                 else Visualizer.Hide(o);
             }
-
-            DebugToggle();
-        }
-
-        [Tooltip("Recognised objects further than this keep tracking but drop their highlight.")]
-        public float maxHighlightDistance = 4f;   // matches the focus range above
-        [Tooltip("At most this many highlights at once — see-through surfaces are a Quest budget.")]
-        public int maxHighlighted = 12;
-
-        /// <summary>Click both thumbsticks in and hold for a second: debug labels on, again for off.</summary>
-        private float _debugHeldFor;
-        private void DebugToggle()
-        {
-            var held = OVRInput.Get(OVRInput.RawButton.LThumbstick) && OVRInput.Get(OVRInput.RawButton.RThumbstick);
-            if (!held) { _debugHeldFor = 0f; return; }
-            _debugHeldFor += Time.deltaTime;
-            if (_debugHeldFor < 1f) return;
-            _debugHeldFor = float.NegativeInfinity;   // fire once per hold
-            VisionDebug.Enabled = !VisionDebug.Enabled;
-            Debug.Log($"[Vision] debug labels {(VisionDebug.Enabled ? "ON" : "OFF")}.");
         }
 
         private void OnDestroy()
