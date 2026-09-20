@@ -9,7 +9,8 @@ namespace CutOnce.Vision
 {
     /// <summary>
     /// YOLOv9 on the passthrough camera, adapted from Meta's MultiObjectDetection sample
-    /// (SentisInferenceRunManager). The same converted model and tensor layout are used; output
+    /// (SentisInferenceRunManager). The bundled FP32 export preserves Meta's output graph and
+    /// tensor layout from the pinned original ONNX without the failing weight quantization; output
     /// readback is guarded against failures and stalls, and NMS keeps overlapping different classes.
     ///
     /// Deliberate departures from the sample:
@@ -30,11 +31,11 @@ namespace CutOnce.Vision
     /// </summary>
     public class YoloDetector : MonoBehaviour
     {
-        [Header("Model (Meta's yolov9sentis.sentis + its COCO labels)")]
+        [Header("Model (FP32 YOLOv9 with Meta's output graph + COCO labels)")]
         public ModelAsset modelAsset;
         public TextAsset labelsAsset;
 
-        [Tooltip("CPU is what Meta ships. Their maintainers found GPUPixel does not support the quantized model and GPU was slower.")]
+        [Tooltip("CPU is the recorded-photo-tested backend for this FP32 export on the Mac. Quest CPU performance and alternative GPU backends still require device measurements.")]
         public BackendType backend = BackendType.CPU;
 
         [Range(0f, 1f)] public float scoreThreshold = 0.35f;
@@ -46,6 +47,9 @@ namespace CutOnce.Vision
         [Tooltip("Upper bound on inference rate. The model takes as long as it takes; this only stops us queueing faster than that. A few a second keep the labels live without cooking an XR2.")]
         public float maxInferencesPerSecond = 8f;
 
+        [Tooltip("Discard LIVE camera results older than this many unscaled seconds since texture acquisition. This is a lower bound on sensor age. Defaults to the surface paint's 0.5-second fresh window; recorded-photo DetectOnce is exempt. Increasing this can paint stale locations.")]
+        [Min(0.01f)] public float maxLiveResultAgeSeconds = ObjectVisualizer.SurfaceFadeStartsAfterSeconds;
+
         [Tooltip("The bundled Meta YOLO model already outputs corners (x1,y1,x2,y2). Turn off only for a replacement model that outputs centre+size.")]
         public bool cornerBoxes = true;
 
@@ -53,22 +57,40 @@ namespace CutOnce.Vision
         public bool collectRawClassSummaries;
 
         /// <summary>No inference while this is set; the loop keeps waiting, so it can be turned back on.</summary>
-        public bool Paused { get; set; }
+        public bool Paused
+        {
+            get => _paused;
+            set
+            {
+                if (_paused == value) return;
+                _paused = value;
+                unchecked { _publicationGeneration++; }
+                _publicationCadence.Reset();
+            }
+        }
 
         private bool _loggedRawBox;
+        private bool _paused;
+        private int _publicationGeneration;
 
         /// <summary>Detections, plus the camera pose and input size they were computed against.</summary>
         public event Action<List<DetectedObject>, Pose, Vector2> OnDetections;
+
+        /// <summary>The same accepted batch with acquisition timing for live tracking; the legacy event remains available to recorded-photo callers.</summary>
+        public event Action<List<DetectedObject>, Pose, Vector2, DetectionFrameTiming> OnDetectionFrame;
 
         // ---- diagnostics, so a dead model can never masquerade as a working one ----
         public bool ModelLoaded { get; private set; }
         public bool InferenceRunning { get; private set; }
         public float LastInferenceMs { get; private set; }
-        public float InferencesPerSecond { get; private set; }
+        /// <summary>Successful result publication cadence, not 1000 / processing latency. Zero means unknown or idle.</summary>
+        public float InferencesPerSecond => Paused ? 0f : _publicationCadence.Read(Time.realtimeSinceStartupAsDouble);
         public int LastRawDetections { get; private set; }
         public int LastAcceptedDetections { get; private set; }
         public int TotalInferences { get; private set; }
         public string LastError { get; private set; } = "";
+        public DetectionPublicationRejection LastPublicationRejection { get; private set; }
+        public int DiscardedResults { get; private set; }
         public Vector2Int ModelInputSize => _inputSize;
         public YoloLetterboxLayout LastLetterboxLayout => _letterbox.Layout;
 
@@ -106,7 +128,7 @@ namespace CutOnce.Vision
         private readonly List<(int classId, Vector4 box, float score)> _nmsResults = new();
         private readonly List<DetectedObject> _detections = new();
         private float _lastInferenceStartedAt = -999f;
-        private float _emaFps;
+        private readonly PublicationCadence _publicationCadence = new PublicationCadence();
         private RawClassSummary[] _rawClassSummaries = Array.Empty<RawClassSummary>();
 
         private void Awake()
@@ -174,22 +196,32 @@ namespace CutOnce.Vision
 
         private IEnumerator RunInference()
         {
+            // This marks application acquisition, not sensor exposure. MRUK's public Timestamp is
+            // UTC, a different clock domain; inventing a conversion would claim accuracy we lack.
+            var acquiredAt = Time.realtimeSinceStartupAsDouble;
             var texture = _camera.GetTexture();
             if (texture == null) { yield return null; yield break; }
 
             // Cache the pose BEFORE inference: it describes the image we are about to run on, and by
             // the time results land the head has moved. Everything downstream must use this pose.
             var cameraPose = _camera.GetCameraPose();
-            yield return DetectOnce(texture, cameraPose);
+            yield return DetectLiveFrame(texture, cameraPose, acquiredAt);
         }
 
         /// <summary>
-        /// One inference on one image. RunInference feeds this the live camera texture; tests feed
-        /// it a fixture, so the path under test is the same one the headset runs.
+        /// One recorded/legacy image inference. Uses the same preprocessing, model and decoder as
+        /// live inference, but has no sensor-freshness claim and is not subject to the live age limit.
         /// </summary>
         public IEnumerator DetectOnce(Texture texture, Pose cameraPose)
+            => DetectFrame(texture, cameraPose, default, _publicationGeneration);
+
+        /// <summary>Live inference with explicit monotonic application-acquisition time, not a fabricated sensor timestamp.</summary>
+        public IEnumerator DetectLiveFrame(Texture texture, Pose cameraPose, double acquiredAtRealtimeSeconds)
+            => DetectFrame(texture, cameraPose, new DetectionFrameTiming(acquiredAtRealtimeSeconds), _publicationGeneration);
+
+        private IEnumerator DetectFrame(Texture texture, Pose cameraPose, DetectionFrameTiming frameTiming, int startedGeneration)
         {
-            if (!ModelLoaded || texture == null || InferenceRunning) yield break;
+            if (!ModelLoaded || texture == null || InferenceRunning || Paused) yield break;
 
             _lastInferenceStartedAt = Time.time;
             var startedAt = Time.realtimeSinceStartup;
@@ -234,9 +266,6 @@ namespace CutOnce.Vision
             }
             LastInferenceMs = (Time.realtimeSinceStartup - startedAt) * 1000f;
             TotalInferences++;
-            var instant = LastInferenceMs > 0f ? 1000f / LastInferenceMs : 0f;
-            _emaFps = _emaFps <= 0f ? instant : Mathf.Lerp(_emaFps, instant, 0.2f);
-            InferencesPerSecond = _emaFps;
 
             if (boxes == null || classIds == null || scores == null)
             {
@@ -249,7 +278,60 @@ namespace CutOnce.Vision
             DisposeAll(boxes, classIds, scores);
             if (!decoded) yield break;
 
+            var publishedAt = Time.realtimeSinceStartupAsDouble;
+            LastPublicationRejection = DetectionPublicationGate.Evaluate(frameTiming, publishedAt,
+                maxLiveResultAgeSeconds, startedGeneration, _publicationGeneration, Paused);
+            if (LastPublicationRejection != DetectionPublicationRejection.None)
+            {
+                DiscardedResults++;
+                yield break;
+            }
+
+            _publicationCadence.Record(publishedAt);
+            OnDetectionFrame?.Invoke(_detections, cameraPose, _sourceSize, frameTiming);
             OnDetections?.Invoke(_detections, cameraPose, _sourceSize);
+        }
+
+        /// <summary>
+        /// Allocation-free diagnostic clock with injected monotonic timestamps for deterministic tests.
+        /// Smooths the interval between successful publications, which includes the intentional rate cap,
+        /// camera waits, preprocessing and inference. Processing latency remains a separate measurement.
+        /// A first sample, pause/reset, invalid clock, or a gap above two seconds has no current rate yet.
+        /// </summary>
+        public sealed class PublicationCadence
+        {
+            public const double ResetGapSeconds = 2d;
+            private double _lastPublishedAt = double.NaN;
+            private double _meanInterval;
+
+            public void Record(double now)
+            {
+                if (!Valid(now)) { Reset(); return; }
+                var interval = now - _lastPublishedAt;
+                if (!double.IsNaN(_lastPublishedAt) && interval > 0d && interval <= ResetGapSeconds)
+                    _meanInterval = _meanInterval > 0d ? _meanInterval + (interval - _meanInterval) * .2d : interval;
+                else
+                    _meanInterval = 0d;
+                _lastPublishedAt = now;
+            }
+
+            public float Read(double now)
+            {
+                if (!Valid(now) || double.IsNaN(_lastPublishedAt) || now < _lastPublishedAt || now - _lastPublishedAt > ResetGapSeconds)
+                {
+                    Reset();
+                    return 0f;
+                }
+                return _meanInterval > 0d ? (float)(1d / _meanInterval) : 0f;
+            }
+
+            public void Reset()
+            {
+                _lastPublishedAt = double.NaN;
+                _meanInterval = 0d;
+            }
+
+            private static bool Valid(double value) => !double.IsNaN(value) && !double.IsInfinity(value) && value >= 0d;
         }
 
         /// <summary>Decode + NMS. Isolated so the coroutine never has a yield inside a try/catch.</summary>
@@ -439,8 +521,9 @@ namespace CutOnce.Vision
 
         /// <summary>
         /// Meta's SentisModelEditorConverter bakes a centres-to-corners MatMul into the model, so its
-        /// first output is already x1,y1,x2,y2. The bundled binary is byte-identical to that sample
-        /// (SHA-256 cc25e14d60a90efeddaeedcc5a666c342345e722b281a3f6e73c692adb796b21).
+        /// first output is already x1,y1,x2,y2. Our bundled FP32 export recreates that same output
+        /// graph from the pinned original ONNX without quantizing its weights; it is not the old
+        /// byte-identical quantized sample binary. Model conversion provenance is recorded separately.
         /// Converting it again changes the centre used by camera/depth rays, not just the drawing.
         /// The explicit false option is retained for replacement models with raw centre+size output.
         /// </summary>

@@ -39,6 +39,8 @@ namespace CutOnce.Vision
                 if (Detector != null && !string.IsNullOrEmpty(Detector.LastError)) return "detector error: " + Detector.LastError;
                 if (Camera == null || !Camera.IsReady) return _status;
                 if (Detector == null || !Detector.ModelLoaded) return "camera up, model not loaded yet";
+                if (Detector.LastPublicationRejection == DetectionPublicationRejection.StaleLiveFrame)
+                    return "scanning — latest camera result too old; waiting for a fresh detection";
                 if (VisionDebug.Enabled) return "scanning — diagnostic boxes enabled (hold both thumbsticks to hide)";
                 if (Locator == null || !Locator.IsSupported)
                     return "scanning — measured object positions unavailable; waiting for depth";
@@ -73,7 +75,7 @@ namespace CutOnce.Vision
             Tracker = gameObject.AddComponent<TrackedObjectManager>();
             Visualizer = gameObject.AddComponent<ObjectVisualizer>();
 
-            Detector.OnDetections += HandleDetections;
+            Detector.OnDetectionFrame += HandleDetections;
         }
 
         private IEnumerator Start()
@@ -95,8 +97,9 @@ namespace CutOnce.Vision
             Debug.Log($"[Vision] CAMERA READY {Camera.Resolution.x}x{Camera.Resolution.y}; depth={(Locator.IsSupported ? "supported" : "UNSUPPORTED — positions will fail")}.");
         }
 
-        private void HandleDetections(List<DetectedObject> detections, Pose cameraPose, Vector2 inputSize)
+        private void HandleDetections(List<DetectedObject> detections, Pose cameraPose, Vector2 inputSize, DetectionFrameTiming frameTiming)
         {
+            if (_paused) return;
             _observed.Clear();
             var located = 0;
             var shouldLog = logDetections && Time.time >= _nextLogAt;
@@ -107,7 +110,7 @@ namespace CutOnce.Vision
                 if (!Locator.TryLocate(d, cameraPose, out var world, out var worldSize)) continue;
 
                 located++;
-                var tracked = Tracker.Observe(d, world, worldSize, _observed);
+                var tracked = Tracker.Observe(d, world, worldSize, _observed, frameTiming);
                 _observed.Add(tracked.id);
 
                 if (shouldLog) Debug.Log($"Detected: {d.className} {d.confidence:0.00}  @ {world}");
@@ -205,7 +208,7 @@ namespace CutOnce.Vision
 
         private void OnDestroy()
         {
-            if (Detector != null) Detector.OnDetections -= HandleDetections;
+            if (Detector != null) Detector.OnDetectionFrame -= HandleDetections;
         }
     }
 }

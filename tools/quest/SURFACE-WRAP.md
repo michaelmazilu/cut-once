@@ -16,6 +16,14 @@ unsupported depth, and off-image detections do not become guessed two-metre
 positions or points on room planes. Rejected depth jumps do not refresh an old
 track's timestamp or count toward confirmation; it ages out normally.
 
+Live batches carry a monotonic application-acquisition timestamp. Results more
+than 0.5 seconds old, or from before a pause/resume transition, are discarded
+before they can update any track. Live fading/pruning uses that acquisition age,
+not result arrival. This timestamp is a lower bound on actual sensor age; it
+does not claim RGB/depth synchronization. Recorded-photo inference deliberately
+does not claim live freshness. Scan rate reports actual publication intervals,
+including the rate limit and camera waits, separately from processing latency.
+
 RoomSense's room-wide glow and guessed gaze labels are suppressed while Vision
 owns recognition. Its MRUK room geometry, anchors and colliders remain active.
 This policy applies to both existing and later-created RoomSense components.
@@ -112,6 +120,23 @@ graph in Unity 2.6.1, preserving the runtime asset GUID. The isolated run upload
 the candidate, original backup, license/provenance and conversion report. Normal
 builds keep the bundled model unchanged. Conversion is not recognition proof:
 the unchanged photo acceptance checks must still pass before an APK is built.
+
+The FP32 comparison in Actions run `35499278669` passed both original photos,
+all three repeats, the unchanged confidence/IoU requirements, blank negative
+control and preprocessing checks. Photo 160012: bottle 0.938 confidence / 0.933
+IoU, table 0.423 / 0.909. Photo 146489: bottle 0.970 / 0.961, table 0.616 / 0.809.
+The production shader also passed all 16 synthetic-depth checks. This isolates
+the observed accuracy loss to the quantized export/execution path in this
+comparison, not to class-name mapping or a need to lower confidence thresholds.
+
+The verified candidate is now bundled as `Resources/yolov9sentis.sentis`, SHA-256
+`d827fbd4be185f6af53f5a6c07e51ae05b024714284f8019e42adad6e17b4224`
+(8,311,864 bytes), preserving the original `.meta`. It is generated from the
+same upstream FP32 model with the same corner/class/score output graph, without
+weight quantization. Its MIT notice is included as a Resources text asset in
+the player. A normal build uses these committed bytes and does not convert them.
+Neither the two-photo success nor Mac CPU latency establishes accuracy on every
+COCO class, live Quest camera access, real-world alignment or sustained 72fps.
 
 The same manual workflow supports `mode=device-status`, or run
 `pnpm quest:device-status` on the Mac. This only inspects an authorized USB Quest

@@ -48,6 +48,9 @@ namespace CutOnce.Vision
         public const float SurfaceFadeStartsAfterSeconds = 0.5f;
         public const float SurfaceHiddenAfterSeconds = 0.75f;
 
+        public static float SurfaceFreshnessAtAge(float age) => Mathf.Clamp01((SurfaceHiddenAfterSeconds - age)
+            / (SurfaceHiddenAfterSeconds - SurfaceFadeStartsAfterSeconds));
+
         public bool HasLiveSurfaceDepth => _surface != null && _depth != null
             && _depth.isActiveAndEnabled && _depth.IsDepthAvailable;
 
@@ -168,9 +171,8 @@ namespace CutOnce.Vision
             var cube = cached.highlight.transform;
             var debug = VisionDebug.Enabled;
             var depthReady = HasLiveSurfaceDepth;
-            var age = Mathf.Max(0f, Time.time - o.lastSeenTime);
-            var freshness = Mathf.Clamp01((SurfaceHiddenAfterSeconds - age)
-                / (SurfaceHiddenAfterSeconds - SurfaceFadeStartsAfterSeconds));
+            var age = o.AgeAt(Time.realtimeSinceStartupAsDouble, Time.time);
+            var freshness = SurfaceFreshnessAtAge(age);
             var paintNow = !debug && depthReady && freshness > 0f;
             var targetSize = debug ? o.smoothedWorldSize : o.smoothedWorldSize * surfacePad;
             cube.localScale = Vector3.Lerp(cube.localScale, targetSize, follow);

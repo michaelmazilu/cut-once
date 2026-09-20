@@ -209,5 +209,75 @@ namespace CutOnce.Vision.Tests
             _observed.Add(tracked.id);
             return tracked;
         }
+
+        [Test]
+        public void LiveObservationKeepsAcquisitionTimeRatherThanResultArrivalTime()
+        {
+            var acquiredAt = Time.realtimeSinceStartupAsDouble - .4d;
+            var tracked = _tracker.Observe(Bottle, new Vector3(0f, 1f, 2f), BottleSize, null, new DetectionFrameTiming(acquiredAt));
+            Assert.That(tracked.lastAcquiredAtRealtimeSeconds, Is.EqualTo(acquiredAt));
+            Assert.That(tracked.AgeAt(acquiredAt + .45d, Time.time), Is.EqualTo(.45f).Within(.0001f));
+        }
+
+        [TestCase(0d)]
+        [TestCase(-.1d)]
+        public void RepeatedOrOlderLiveFramesDoNotRefreshOrReconfirmTheTrack(double offset)
+        {
+            var position = new Vector3(0f, 1f, 2f);
+            var acquiredAt = Time.realtimeSinceStartupAsDouble - .3d;
+            var tracked = _tracker.Observe(Bottle, position, BottleSize, null, new DetectionFrameTiming(acquiredAt));
+            var legacyEstimate = tracked.lastSeenTime;
+
+            var repeated = _tracker.Observe(Bottle, position + Vector3.right * .02f, BottleSize * 2f, null,
+                new DetectionFrameTiming(acquiredAt + offset));
+
+            Assert.That(repeated, Is.SameAs(tracked));
+            Assert.That(tracked.totalHits, Is.EqualTo(1));
+            Assert.That(tracked.consecutiveHits, Is.EqualTo(1));
+            Assert.That(tracked.lastAcquiredAtRealtimeSeconds, Is.EqualTo(acquiredAt));
+            Assert.That(tracked.lastSeenTime, Is.EqualTo(legacyEstimate));
+            Assert.That(tracked.worldPosition, Is.EqualTo(position));
+            Assert.That(tracked.worldSize, Is.EqualTo(BottleSize));
+        }
+
+        [Test]
+        public void RejectedDepthJumpDoesNotRefreshTheLiveAcquisitionClock()
+        {
+            _tracker.associationDistance = .75f;
+            var position = new Vector3(0f, 1f, 2f);
+            var acquiredAt = Time.realtimeSinceStartupAsDouble - .3d;
+            var tracked = _tracker.Observe(Bottle, position, BottleSize, null, new DetectionFrameTiming(acquiredAt));
+            _tracker.Observe(Bottle, position + Vector3.right * .6f, BottleSize * 2f, null,
+                new DetectionFrameTiming(acquiredAt + .2d));
+            Assert.That(tracked.lastAcquiredAtRealtimeSeconds, Is.EqualTo(acquiredAt));
+            Assert.That(tracked.totalHits, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ANewerAcceptedLiveFrameUpdatesTheSameTrackWithItsOwnCaptureTime()
+        {
+            var position = new Vector3(0f, 1f, 2f);
+            var acquiredAt = Time.realtimeSinceStartupAsDouble - .3d;
+            var tracked = _tracker.Observe(Bottle, position, BottleSize, null, new DetectionFrameTiming(acquiredAt));
+            var updated = _tracker.Observe(Bottle, position + Vector3.right * .02f, BottleSize, null,
+                new DetectionFrameTiming(acquiredAt + .2d));
+            Assert.That(updated, Is.SameAs(tracked));
+            Assert.That(tracked.lastAcquiredAtRealtimeSeconds, Is.EqualTo(acquiredAt + .2d));
+            Assert.That(tracked.totalHits, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void PruningUsesLiveCaptureAgeEvenWhenLegacyArrivalTimeLooksFresh()
+        {
+            var acquiredAt = Time.realtimeSinceStartupAsDouble - .1d;
+            var tracked = _tracker.Observe(Bottle, new Vector3(0f, 1f, 2f), BottleSize, null, new DetectionFrameTiming(acquiredAt));
+            tracked.lastAcquiredAtRealtimeSeconds = Time.realtimeSinceStartupAsDouble - _tracker.keepAliveSeconds - .1d;
+            tracked.lastSeenTime = Time.time;
+
+            var removed = _tracker.Prune();
+            Assert.That(removed, Has.Count.EqualTo(1));
+            Assert.That(removed[0], Is.SameAs(tracked));
+            Assert.That(_tracker.Objects, Is.Empty);
+        }
     }
 }

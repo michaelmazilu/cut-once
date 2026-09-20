@@ -14,11 +14,20 @@ namespace CutOnce.Vision
         public Vector3 smoothedWorldPosition;  // what the visuals follow
         public Vector3 worldSize = new Vector3(0.25f, 0.25f, 0.25f);          // newest raw estimate
         public Vector3 smoothedWorldSize = new Vector3(0.25f, 0.25f, 0.25f);  // what the highlight is scaled to
-        public float lastSeenTime;
+        public float lastSeenTime;            // legacy scaled-time estimate; live aging uses the acquisition clock below
+        public double lastAcquiredAtRealtimeSeconds = double.NaN; // NaN means a legacy/recorded caller supplied no live timestamp
         public int consecutiveHits;
         public int totalHits;
         public bool visible;                   // promoted past the hit threshold
         public GameObject visual;
+
+        /// <summary>Live freshness includes inference delay. Legacy callers retain their existing scaled-time behavior.</summary>
+        public float AgeAt(double realtimeNow, float legacyNow)
+        {
+            if (double.IsNaN(lastAcquiredAtRealtimeSeconds)) return Mathf.Max(0f, legacyNow - lastSeenTime);
+            var age = realtimeNow - lastAcquiredAtRealtimeSeconds;
+            return double.IsNaN(age) || double.IsInfinity(age) || age < 0d ? float.PositiveInfinity : (float)age;
+        }
     }
 
     /// <summary>
@@ -75,7 +84,8 @@ namespace CutOnce.Vision
         /// Input detections must already be de-duplicated by NMS; this is one-to-one spatial tracking,
         /// not a second object detector or proof that overlapping detections are distinct objects.
         /// </summary>
-        public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize, ISet<int> observedIds)
+        public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize, ISet<int> observedIds,
+            DetectionFrameTiming frameTiming = default)
         {
             var now = Time.time;
             var match = FindNearest(detection.classId, world, observedIds);
@@ -96,6 +106,10 @@ namespace CutOnce.Vision
             }
             else
             {
+                // A repeated or out-of-order live frame must not reconfirm or refresh a newer track.
+                if (frameTiming.isLiveCapture && !double.IsNaN(match.lastAcquiredAtRealtimeSeconds) &&
+                    frameTiming.acquiredAtRealtimeSeconds <= match.lastAcquiredAtRealtimeSeconds)
+                    return match;
                 // A wild jump is nearly always a depth sample that found the wall behind the object,
                 // not the object teleporting. It is not evidence that the OLD geometry is still fresh:
                 // do not refresh its timestamp, confidence, hit counts, or raw/smoothed geometry.
@@ -117,7 +131,11 @@ namespace CutOnce.Vision
 
             match.className = detection.className;
             match.confidence = Mathf.Max(match.confidence * 0.9f, detection.confidence);
-            match.lastSeenTime = now;
+            match.lastAcquiredAtRealtimeSeconds = frameTiming.isLiveCapture ? frameTiming.acquiredAtRealtimeSeconds : double.NaN;
+            // Keep a useful legacy estimate without treating result arrival as a new capture. Live
+            // pruning/rendering uses the unscaled timestamp directly, including through timescale changes.
+            match.lastSeenTime = frameTiming.isLiveCapture
+                ? now - (float)(Time.realtimeSinceStartupAsDouble - frameTiming.acquiredAtRealtimeSeconds) : now;
             match.consecutiveHits++;
             match.totalHits++;
             if (!match.visible && match.consecutiveHits >= hitsBeforeVisible) match.visible = true;
@@ -130,9 +148,10 @@ namespace CutOnce.Vision
             removed ??= new List<TrackedObject>();
             removed.Clear();
             var now = Time.time;
+            var realtimeNow = Time.realtimeSinceStartupAsDouble;
             for (var i = _objects.Count - 1; i >= 0; i--)
             {
-                if (now - _objects[i].lastSeenTime <= keepAliveSeconds) continue;
+                if (_objects[i].AgeAt(realtimeNow, now) <= keepAliveSeconds) continue;
                 removed.Add(_objects[i]);
                 _objects.RemoveAt(i);
             }
