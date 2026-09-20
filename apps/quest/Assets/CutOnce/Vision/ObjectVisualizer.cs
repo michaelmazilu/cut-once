@@ -20,21 +20,26 @@ namespace CutOnce.Vision
     /// </summary>
     public class ObjectVisualizer : MonoBehaviour
     {
+        // Tuned against the palette's own over-passthrough values (MISSING: edge 0.9; CURRENT_STEP:
+        // fill 0.35): anything much quieter than these reads as "nothing there" on a real headset,
+        // which is exactly what happened to the first draft of this file at edge 0.5 / fill 0.04.
         [Header("Recognised (every visible object)")]
-        public Color edgeColour = new Color(0.30f, 0.64f, 1f);      // #4DA3FF, the palette's blue
-        [Range(0f, 1f)] public float edgeAlpha = 0.5f;
-        [Range(0f, 1f)] public float fillAlpha = 0.04f;
-        public float edgeWidthPx = 1.5f;
+        public Color edgeColour = new Color(0.13f, 0.83f, 0.93f);   // #22D3EE, the app's cyan
+        [Range(0f, 1f)] public float edgeAlpha = 0.95f;
+        [Range(0f, 1f)] public float fillAlpha = 0.14f;
+        public float edgeWidthPx = 2.5f;
 
         [Header("Focused (the one being looked at)")]
         public Color focusEdgeColour = new Color(0.40f, 0.91f, 0.98f); // #67E8F9, brighter cyan
-        [Range(0f, 1f)] public float focusEdgeAlpha = 0.85f;
-        [Range(0f, 1f)] public float focusFillAlpha = 0.10f;
-        public float focusEdgeWidthPx = 2f;
+        [Range(0f, 1f)] public float focusEdgeAlpha = 1f;
+        [Range(0f, 1f)] public float focusFillAlpha = 0.28f;
+        public float focusEdgeWidthPx = 3.5f;
+        [Tooltip("The looked-at object breathes. 0 stops it.")]
+        public float focusPulseHz = 1.2f;
 
         [Header("Label")]
         public float labelGap = 0.04f;      // metres above the top of the highlight
-        public float labelSize = 0.0035f;
+        public float labelSize = 0.005f;
 
         [Tooltip("How fast visuals catch up to the tracked position, in metres/second of lerp.")]
         public float followSpeed = 8f;
@@ -158,11 +163,12 @@ namespace CutOnce.Vision
             _props.SetColor(FillColor, new Color(edge.r, edge.g, edge.b, fill));
             _props.SetColor(EdgeColor, new Color(edge.r, edge.g, edge.b, focused ? focusEdgeAlpha : edgeAlpha));
             _props.SetFloat(EdgeWidthPxId, focused ? focusEdgeWidthPx : edgeWidthPx);
-            // Brackets when merely recognised (a quiet reticle at the corners); full thin edges when
-            // focused. Never the grid: the grid is the debug look this class exists to retire.
-            _props.SetFloat(Brackets, focused ? 0f : 1f);
+            // Full edges always — brackets alone disappear on small objects over passthrough. The
+            // focused object also breathes. Never the grid: the grid is the debug look this class
+            // exists to retire.
+            _props.SetFloat(Brackets, 0f);
             _props.SetFloat(Grid, 0f);
-            _props.SetFloat(PulseHz, 0f);
+            _props.SetFloat(PulseHz, focused ? focusPulseHz : 0f);
             _props.SetFloat(EdgeMode, 1f);                            // box edge maths
             _props.SetVector(HalfSize, new Vector4(0.5f, 0.5f, 0.5f, 0f)); // unit cube; world size comes from the transform
             _props.SetFloat(RevealY, 1e6f);                           // no reveal wipe on highlights

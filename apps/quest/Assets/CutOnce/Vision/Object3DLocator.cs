@@ -59,7 +59,6 @@ namespace CutOnce.Vision
         public string LastFailureReason { get; private set; } = "";
 
         private VisionCamera _camera;
-        private Vector2 _lastInputSize = new Vector2(640f, 640f);
         private EnvironmentRaycastManager _raycast;
         private readonly List<float> _distances = new();
 
@@ -122,14 +121,13 @@ namespace CutOnce.Vision
             var box = detection.boundingBox;
             var input = detection.inputSize;
             if (input.x <= 0f || input.y <= 0f) { LastFailureReason = "bad input size"; return false; }
-            _lastInputSize = input;
 
             var centreRay = RayThrough(box.center, input, cameraPose);
             if (_raycast == null)                                    // no depth sensing: the room's surfaces instead of nothing at all
             {
                 LastSuccesses++;
                 var placed = LocateWithoutDepth(centreRay, out world);
-                if (placed) size = SizeAt(Vector3.Distance(cameraPose.position, world), box, size, cameraPose);
+                if (placed) size = SizeAt(Vector3.Distance(cameraPose.position, world), box, input, cameraPose);
                 return placed;
             }
             var forward = cameraPose.rotation * Vector3.forward;
@@ -150,7 +148,7 @@ namespace CutOnce.Vision
                         box.xMin + box.width * Mathf.Lerp(inset, 1f - inset, t.x),
                         box.yMin + box.height * Mathf.Lerp(inset, 1f - inset, t.y));
 
-                    var ray = RayThrough(pixel, size, cameraPose);
+                    var ray = RayThrough(pixel, input, cameraPose);
                     if (!_raycast.Raycast(ray, out var hit, maxDistance)) continue;
                     if (hit.status != EnvironmentRaycastHitStatus.Hit) continue;
 
@@ -177,7 +175,7 @@ namespace CutOnce.Vision
             var cosine = Vector3.Dot(centreRay.direction, forward);
             if (cosine < 0.1f) { LastFailureReason = "detection too far off-axis to place"; return false; }
             world = centreRay.GetPoint(depthAt / cosine);
-            size = SizeAt(depthAt / cosine, box, size, cameraPose);
+            size = SizeAt(depthAt / cosine, box, input, cameraPose);
             LastSuccesses++;
             LastFailureReason = "";
             return true;
@@ -202,8 +200,6 @@ namespace CutOnce.Vision
             return new Vector3(width, height, depth);
         }
 
-        private Vector3 SizeAt(float distance, Rect box, Vector3 fallback, Pose cameraPose)
-            => _camera != null ? SizeAt(distance, box, _lastInputSize, cameraPose) : fallback;
 
         /// <summary>Box pixel (top-left origin) -> viewport (bottom-left origin) -> world ray. The y flip is mandatory.</summary>
         private Ray RayThrough(Vector2 pixel, Vector2 inputSize, Pose cameraPose)
