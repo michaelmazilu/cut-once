@@ -16,18 +16,20 @@ jobs:
   quest:
     runs-on: [self-hosted, macOS, cutonce-unity]
     timeout-minutes: 120
+    env:
+      QUEST_BUILD_ROOT: ${{ github.workspace }}/quest-build-${{ github.run_id }}-${{ github.run_attempt }}
     defaults:
       run:
         shell: bash
-        working-directory: ${{ env.QUEST_BUILD_ROOT }}
+        working-directory: ${{ github.workspace }}/quest-build-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out requested commit
         working-directory: ${{ github.workspace }}
         run: |
           # The public repo contains a gitlink without .gitmodules. Plain Git avoids
           # checkout action's recursive submodule credential cleanup, which fails on it.
-          build_root=$(mktemp -d "$RUNNER_TEMP/quest-build.XXXXXX")
-          echo "QUEST_BUILD_ROOT=$build_root" >> "$GITHUB_ENV"
+          build_root="$QUEST_BUILD_ROOT"
+          mkdir "$build_root"
           git init "$build_root"
           cd "$build_root"
           git remote add origin https://github.com/michaelmazilu/kitbash.git
