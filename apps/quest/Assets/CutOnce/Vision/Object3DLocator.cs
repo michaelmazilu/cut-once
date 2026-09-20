@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CutOnce.Core.Vision;
 using Meta.XR;
 using Meta.XR.MRUtilityKit;
 using UnityEngine;
@@ -54,6 +55,16 @@ namespace CutOnce.Vision
         [Tooltip("Used only where there is no depth sensing (running from the Editor over Link): how far down the ray to put an object the room's own planes did not catch.")]
         public float fallbackDistance = 2f;
 
+        [Header("Measured boxes")]
+        [Tooltip("Rays per side across the detection box. 12 = 144 samples: enough to cluster, few enough to cast inside one frame.")]
+        [Range(6, 24)] public int measureGrid = 12;
+
+        [Tooltip("How far PAST the box to sample, as a fraction of it. The fit wants this spill — background is what it separates the object from, and a cluster it never sees it cannot reject.")]
+        [Range(0f, 0.5f)] public float measureMargin = 0.15f;
+
+        public int LastPatchPoints { get; private set; }
+        public string LastFitReason { get; private set; } = "";
+
         public int LastAttempts { get; private set; }
         public int LastSuccesses { get; private set; }
         public string LastFailureReason { get; private set; } = "";
@@ -61,12 +72,15 @@ namespace CutOnce.Vision
         private VisionCamera _camera;
         private EnvironmentRaycastManager _raycast;
         private readonly List<float> _distances = new();
+        private readonly List<P3> _patch = new();
+        private FitOptions _fitOptions;
 
         public bool IsSupported => EnvironmentRaycastManager.IsSupported;
 
         private void Awake()
         {
             _camera = GetComponent<VisionCamera>() ?? FindAnyObjectByType<VisionCamera>();
+            _fitOptions = new FitOptions { MaxReachM = maxDistance };
             if (!EnvironmentRaycastManager.IsSupported)
             {
                 LastFailureReason = "EnvironmentRaycastManager not supported on this device/simulator";
@@ -183,6 +197,49 @@ namespace CutOnce.Vision
 
         /// <summary>A person is real and taller than furniture-sized clutter; everything else keeps the tight clamp.</summary>
         private float HeightCap(string className) => className == "person" ? 2.0f : maxSizeM;
+
+        /// <summary>
+        /// MEASURES the object rather than inferring it: a grid of rays over the detection fills a small point cloud,
+        /// and <see cref="ObjectBoxFitter"/> finds the object inside it.
+        ///
+        /// Why this exists next to TryLocate. TryLocate reads ONE distance through the box and multiplies it into
+        /// every axis, so when that distance lands on the wall behind the object — which a rectangle around a bottle
+        /// guarantees it sometimes will — the box grows by the whole ratio. Here the wall is not something to be
+        /// filtered out by a percentile, it is a DIFFERENT CLUSTER, and it never enters the box at all.
+        ///
+        /// Costs about <c>measureGrid²</c> raycasts, so the caller paces it (RoomScanner measures a few objects a
+        /// second and lets <see cref="BoxSmoother"/> hold each box in between) rather than running it per detection.
+        /// </summary>
+        public bool TryMeasure(in DetectedObject detection, Pose cameraPose, SizePrior prior, out FitResult fit)
+        {
+            fit = FitResult.Rejected("no depth sensing here");
+            if (_raycast == null) return false;
+
+            var box = detection.boundingBox;
+            var input = detection.inputSize;
+            if (input.x <= 0f || input.y <= 0f) { fit = FitResult.Rejected("bad input size"); return false; }
+
+            _patch.Clear();
+            var n = Mathf.Max(2, measureGrid);
+            var spill = -measureMargin * 0.5f;                     // negative inset: the grid reaches past the box
+            for (var gy = 0; gy < n; gy++)
+                for (var gx = 0; gx < n; gx++)
+                {
+                    var pixel = new Vector2(
+                        box.xMin + box.width * Mathf.Lerp(spill, 1f - spill, gx / (float)(n - 1)),
+                        box.yMin + box.height * Mathf.Lerp(spill, 1f - spill, gy / (float)(n - 1)));
+                    var ray = RayThrough(pixel, input, cameraPose);
+                    if (!_raycast.Raycast(ray, out var hit, maxDistance)) continue;
+                    if (hit.status != EnvironmentRaycastHitStatus.Hit) continue;
+                    _patch.Add(new P3(hit.point.x, hit.point.y, hit.point.z));
+                }
+
+            LastPatchPoints = _patch.Count;
+            var eye = cameraPose.position;
+            fit = ObjectBoxFitter.Fit(_patch, new P3(eye.x, eye.y, eye.z), prior, _fitOptions);
+            LastFitReason = fit.Ok ? "" : fit.Reason;
+            return fit.Ok;
+        }
 
         /// <summary>
         /// The box's world size at a given distance along the view: rays through the edge midpoints,

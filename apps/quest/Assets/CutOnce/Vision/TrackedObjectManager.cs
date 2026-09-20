@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CutOnce.Core.Vision;
 using UnityEngine;
 
 namespace CutOnce.Vision
@@ -19,6 +20,36 @@ namespace CutOnce.Vision
         public int totalHits;
         public bool visible;                   // promoted past the hit threshold
         public GameObject visual;
+
+        // ── the measured box ───────────────────────────────────────────────────────────────────────────────────
+        // Detection is cheap and happens every frame; measuring a box costs a few hundred raycasts and happens a
+        // few times a second. The smoother is what holds the box still in between, so the two can run at their own
+        // rates instead of the slower one setting the pace for both.
+
+        /// <summary>Holds this object's box across measurements: position, extents, turn and how sure the geometry is.</summary>
+        public readonly BoxSmoother box = new BoxSmoother();
+
+        /// <summary>True once a real fit has landed. Until then there is no box worth drawing.</summary>
+        public bool hasMeasuredBox;
+        public Vector3 measuredCentre;
+        public Vector3 measuredSize;
+        public float measuredYawDeg;
+        public float geometryConfidence;
+        public float lastMeasuredTime = -999f;
+        /// <summary>Why the last attempt produced nothing, for the debug label.</summary>
+        public string lastFitReason = "";
+
+        // The newest detection of this object, kept so a measurement can be paced apart from the frame that saw it.
+        // Objects do not move on their own, so a box that is a few frames stale still points at the right thing.
+        public Rect lastBox;
+        public Vector2 lastInputSize;
+        public Pose lastPose;
+        public bool hasLastBox;
+
+        /// <summary>What the highlight should be drawn as: the measured box where there is one, the old estimate otherwise.</summary>
+        public Vector3 DisplayCentre => hasMeasuredBox ? measuredCentre : smoothedWorldPosition;
+        public Vector3 DisplaySize => hasMeasuredBox ? measuredSize : smoothedWorldSize;
+        public float DisplayYawDeg => hasMeasuredBox ? measuredYawDeg : 0f;
     }
 
     /// <summary>
@@ -107,6 +138,35 @@ namespace CutOnce.Vision
             match.totalHits++;
             if (!match.visible && match.consecutiveHits >= hitsBeforeVisible) match.visible = true;
             return match;
+        }
+
+        /// <summary>
+        /// Fold one measured box into an object. A rejected fit is not nothing: it decays the geometry's confidence
+        /// and, if they keep coming, retires the box — a hologram that is no longer being confirmed should fade, not
+        /// sit there at full strength because the last good frame was convincing.
+        /// </summary>
+        public void Measure(TrackedObject o, FitResult fit)
+        {
+            var now = Time.time;
+            var dt = Mathf.Clamp(now - o.lastMeasuredTime, 0f, 1f);
+            o.lastMeasuredTime = now;
+            o.lastFitReason = fit.Ok ? "" : fit.Reason;
+
+            o.box.Update(fit, dt);
+            if (!o.box.HasBox) return;
+
+            o.hasMeasuredBox = true;
+            var centre = o.box.Centre;
+            var size = o.box.Size;
+            o.measuredCentre = new Vector3(centre.X, centre.Y, centre.Z);
+            o.measuredSize = new Vector3(size.X, size.Y, size.Z);
+            o.measuredYawDeg = o.box.YawDeg;
+            o.geometryConfidence = o.box.GeometryConfidence;
+
+            // The measured centre is the better position, so association uses it too — otherwise the box and the
+            // thing the tracker thinks it is following drift apart.
+            o.smoothedWorldPosition = o.measuredCentre;
+            o.smoothedWorldSize = o.measuredSize;
         }
 
         /// <summary>Retire anything not seen recently. Returns objects that died this call so visuals can be freed.</summary>

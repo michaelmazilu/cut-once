@@ -117,10 +117,13 @@ namespace CutOnce.Vision
             // The size goes on the CUBE, never the root: the label billboards, and a rotated child
             // under a non-uniform scale shears its glyphs.
             var follow = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
-            t.position = Vector3.Lerp(t.position, o.smoothedWorldPosition, follow);
+            t.position = Vector3.Lerp(t.position, o.DisplayCentre, follow);
             var cube = cached.highlight.transform;
-            var targetSize = _surface != null ? o.smoothedWorldSize * surfacePad : o.smoothedWorldSize;
+            var targetSize = _surface != null ? o.DisplaySize * surfacePad : o.DisplaySize;
             cube.localScale = Vector3.Lerp(cube.localScale, targetSize, follow);
+            // The turn goes on the cube for the same reason the size does: the label is a sibling and must stay
+            // upright and facing the viewer. A box on a desk is turned, never tipped, so yaw is the only axis.
+            cube.localRotation = Quaternion.Slerp(cube.localRotation, Quaternion.Euler(0f, o.DisplayYawDeg, 0f), follow);
 
             if (cached.lastFocused != focused)
             {
@@ -160,8 +163,12 @@ namespace CutOnce.Vision
         {
             var name = string.IsNullOrEmpty(o.className) ? "object" : o.className.ToUpperInvariant();
             if (!VisionDebug.Enabled) return name;
-            var s = o.smoothedWorldSize;
-            return $"{name} · {o.confidence * 100f:0}% · #{o.id} · {s.x * 100f:0}×{s.y * 100f:0}×{s.z * 100f:0} cm";
+            var s = o.DisplaySize;
+            // Two confidences, deliberately separate: how sure the model is that it is a bottle, and how sure the
+            // GEOMETRY is. A crisp box around a thing the model has misnamed should not read as certainty.
+            var geometry = o.hasMeasuredBox ? $"g{o.geometryConfidence * 100f:0}%" : "unmeasured";
+            return $"{name} · {o.confidence * 100f:0}% · {geometry} · #{o.id} · " +
+                   $"{s.x * 100f:0}×{s.y * 100f:0}×{s.z * 100f:0} cm · {o.DisplayYawDeg:0}°";
         }
 
         public void Hide(TrackedObject o)
@@ -211,12 +218,13 @@ namespace CutOnce.Vision
         private GameObject Build(TrackedObject o)
         {
             var root = new GameObject($"[Vision] {o.className}");
-            root.transform.position = o.smoothedWorldPosition;
+            root.transform.position = o.DisplayCentre;
 
             var box = GameObject.CreatePrimitive(PrimitiveType.Cube);
             box.name = "Highlight";
             box.transform.SetParent(root.transform, false);
-            box.transform.localScale = o.smoothedWorldSize;
+            box.transform.localScale = o.DisplaySize;
+            box.transform.localRotation = Quaternion.Euler(0f, o.DisplayYawDeg, 0f);
             // An overlay must never eat a controller ray or a physics query. Destroy() is deferred to
             // end of frame, so disable first — otherwise the collider is live for one frame.
             var collider = box.GetComponent<Collider>();

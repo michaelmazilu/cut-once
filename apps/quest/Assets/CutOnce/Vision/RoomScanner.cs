@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using CutOnce.Core.Vision;
 using UnityEngine;
 
 namespace CutOnce.Vision
@@ -24,6 +25,13 @@ namespace CutOnce.Vision
         [Range(0f, 1f)] public float minConfidence = 0.4f;
         public bool logDetections = true;
         public float logInterval = 1f;
+
+        [Header("Measuring")]
+        [Tooltip("Boxes measured per second, at most one per frame. Each costs a few hundred raycasts, so this is the frame-time dial; the smoother holds every box steady in between.")]
+        [Range(1f, 30f)] public float measurementsPerSecond = 8f;
+
+        [Tooltip("Show objects whose box has not been measured yet, using the old size-from-one-distance estimate. Off on the headset: that estimate is what drew metre-wide boxes around people.")]
+        public bool showUnmeasured = false;
 
         public VisionCamera Camera { get; private set; }
         public YoloDetector Detector { get; private set; }
@@ -92,16 +100,30 @@ namespace CutOnce.Vision
         {
             _observed.Clear();
             var located = 0;
+            var ignored = 0;
             var shouldLog = logDetections && Time.time >= _nextLogAt;
 
             foreach (var d in detections)
             {
                 if (d.confidence < minConfidence) continue;
+
+                // People and furniture are never boxed. Dropped HERE, before any depth is touched, so a person in
+                // the room costs nothing at all — no raycasts, no tracking, no hologram. A box around a judge reads
+                // as surveillance, and a sofa's box swallows the view.
+                if (SizePriors.Ignored(d.className)) { ignored++; continue; }
+
                 if (!Locator.TryLocate(d, cameraPose, out var world, out var worldSize)) continue;
 
                 located++;
                 var tracked = Tracker.Observe(d, world, worldSize);
                 _observed.Add(tracked.id);
+
+                // Keep the newest sighting so the box can be measured later, at its own pace, instead of paying for
+                // a few hundred raycasts inside the frame that ran inference.
+                tracked.lastBox = d.boundingBox;
+                tracked.lastInputSize = d.inputSize;
+                tracked.lastPose = cameraPose;
+                tracked.hasLastBox = true;
 
                 if (shouldLog) Debug.Log($"Detected: {d.className} {d.confidence:0.00}  @ {world}");
             }
@@ -109,8 +131,11 @@ namespace CutOnce.Vision
             if (shouldLog)
             {
                 _nextLogAt = Time.time + logInterval;
+                var measured = 0;
+                foreach (var o in Tracker.Objects) if (o.hasMeasuredBox) measured++;
                 Debug.Log($"[Vision] {Detector.LastRawDetections} raw -> {detections.Count} after NMS -> " +
-                          $"{located} located | tracked {Tracker.Objects.Count} ({Tracker.VisibleCount} visible) | " +
+                          $"{located} located, {ignored} never-boxed | tracked {Tracker.Objects.Count} " +
+                          $"({Tracker.VisibleCount} visible, {measured} measured) | " +
                           $"{Detector.LastInferenceMs:0} ms, {Detector.InferencesPerSecond:0.0}/s");
             }
 
@@ -138,10 +163,45 @@ namespace CutOnce.Vision
         private UnityEngine.Camera _eye;
         private TrackedObject _focused;
 
+        /// <summary>
+        /// One box measured per frame at most, and only every so often: each costs a few hundred raycasts, and a
+        /// dozen of them in the frame that just ran inference is a dropped frame you can feel. Round-robin over the
+        /// tracked set, oldest measurement first, so everything in the room converges rather than whatever happens
+        /// to be in front. <see cref="BoxSmoother"/> holds each box still between its turns.
+        /// </summary>
+        private void MeasureOne()
+        {
+            if (!Locator.IsSupported || Tracker.Objects.Count == 0) return;
+            if (Time.time < _nextMeasureAt) return;
+            _nextMeasureAt = Time.time + 1f / Mathf.Max(1f, measurementsPerSecond);
+
+            TrackedObject oldest = null;
+            foreach (var o in Tracker.Objects)
+            {
+                if (!o.hasLastBox) continue;
+                if (oldest == null || o.lastMeasuredTime < oldest.lastMeasuredTime) oldest = o;
+            }
+            if (oldest == null) return;
+
+            Locator.TryMeasure(new DetectedObject
+            {
+                classId = oldest.classId,
+                className = oldest.className,
+                confidence = oldest.confidence,
+                boundingBox = oldest.lastBox,
+                inputSize = oldest.lastInputSize,
+            }, oldest.lastPose, SizePriors.For(oldest.className), out var fit);
+
+            Tracker.Measure(oldest, fit);
+        }
+
+        private float _nextMeasureAt;
+
         private void Update()
         {
             if (_paused) return;
             foreach (var o in Tracker.Prune(_removed)) Visualizer.Release(o);
+            MeasureOne();
             if (_eye == null) _eye = UnityEngine.Camera.main;
             TrackedObject focus = null;
             float best = 0f;
@@ -150,8 +210,8 @@ namespace CutOnce.Vision
                 var head = _eye.transform;
                 foreach (var o in Tracker.Objects)
                 {
-                    if (!o.visible) continue;
-                    var offset = o.smoothedWorldPosition - head.position;
+                    if (!o.visible || !Drawable(o)) continue;
+                    var offset = o.DisplayCentre - head.position;
                     float distance = offset.magnitude;
                     if (distance < .2f || distance > 4f) continue;
                     float facing = Vector3.Dot(head.forward, offset / distance);
@@ -168,15 +228,23 @@ namespace CutOnce.Vision
             var shown = 0;
             foreach (var o in Tracker.Objects)
             {
-                if (!o.visible) { Visualizer.Hide(o); continue; }
+                if (!o.visible || !Drawable(o)) { Visualizer.Hide(o); continue; }
                 var head = _eye != null ? _eye.transform.position : Vector3.zero;
-                var near = Vector3.Distance(head, o.smoothedWorldPosition) <= maxHighlightDistance;
+                var near = Vector3.Distance(head, o.DisplayCentre) <= maxHighlightDistance;
                 if (near && shown < maxHighlighted) { Visualizer.Show(o, o == focus); shown++; }
                 else Visualizer.Hide(o);
             }
 
             DebugToggle();
         }
+
+        /// <summary>
+        /// Is there a box worth drawing? Where depth exists, only a MEASURED one: the old estimate is what put
+        /// metre-wide holograms around people, and an object waits a fraction of a second for its first fit rather
+        /// than wearing a wrong box in the meantime. Without depth — the Editor, or Link — there is nothing to
+        /// measure from, so the old estimate is all there is and the pipeline can still be watched end to end.
+        /// </summary>
+        private bool Drawable(TrackedObject o) => o.hasMeasuredBox || showUnmeasured || !Locator.IsSupported;
 
         [Tooltip("Recognised objects further than this keep tracking but drop their highlight.")]
         public float maxHighlightDistance = 4f;   // matches the focus range above
