@@ -1,4 +1,37 @@
-# Object placement demo (Quest 3)
+# Physical surface checks and object placement demo (Quest 3)
+
+## Real depth checks in the main app
+
+`CutOnceApp` installs `LivePlacementCheck` automatically. It checks the visible surfaces of the selected
+full-size box hologram using Quest environment depth and normals. Unity colliders, saved room planes,
+YOLO's approximate centre, and simulated object transforms are never used as physical evidence.
+
+1. Close Unity, run `pnpm quest:build`, then `pnpm quest:install`.
+2. On Quest 3, allow camera and spatial data access. Load/start a build and lock its hologram in place.
+3. Position the physical box, then point the right controller at its hologram. Expose at least two faces,
+   keep hands clear, and view it from 25 cm to 2.5 m away.
+4. Amber means measurements are settling. Green and **Visible surfaces match** mean repeated depth
+   measurements match within 5 cm and surface-normal angles within 12 degrees for 0.5 seconds.
+5. Inspect the object, then press B to mark built. The check does not write completion events.
+
+At least two nonparallel faces must each match at 8 of 9 sampled points. Box dimensions must all be at
+least 8 cm. Thin planks, cylinders, arbitrary meshes and scaled tabletop models are not supported.
+Missing depth, low-confidence normals, occlusion, stale images, target changes or tracking loss clear
+or restart feedback. Checks run at most 10 times/second, at most 27 rays, with a 3 ms ray-query budget.
+The actual headset performance and sample availability within that budget still need device testing.
+
+Green means **visible geometry matches**, not identification of a particular physical instance, proof
+of fastening/hidden connections, release, or structural stability. The 12-degree test compares surface
+normals, not a recovered complete object rotation. A similarly shaped substitute can match. A single
+wall/table plane cannot confirm a box. The operator must still check object identity before marking B.
+
+Camera capture age is preserved when converting to Unity's monotonic clock. The environment-raycast
+API supplies hit position, normal and confidence, but no per-hit timestamp; independent depth-frame
+freshness auditing remains a platform limitation. There is no simulated fallback when depth is missing.
+The Mac simulator cannot validate real camera/depth or passthrough readability. The pose demo below
+remains a separate way to exercise the existing pose tracker.
+
+## Pose-based demo
 
 This feature checks whether an identified object's observed 3D pose matches its assembly target.
 `Confirmed` currently means **pose alignment confirmed**, not physical pickup/release or task completion.

@@ -98,6 +98,7 @@ namespace CutOnce.Device
             // Build mode ("what can I build?"): off until a scan starts it, so other runs behave exactly as before.
             _build = gameObject.AddComponent<BuildMode>();
             _build.Init(_config, _api, _sync, _store, _assembly, _alignment, _input, surface, _hud, _material, _palette);
+            gameObject.AddComponent<LivePlacementCheck>().Init(_assembly, _alignment, _selection, _build, _hud);
         }
 
         void Start()
