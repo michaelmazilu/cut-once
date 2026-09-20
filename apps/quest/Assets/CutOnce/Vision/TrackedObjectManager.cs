@@ -12,8 +12,8 @@ namespace CutOnce.Vision
         public float confidence;
         public Vector3 worldPosition;          // newest raw measurement
         public Vector3 smoothedWorldPosition;  // what the visuals follow
-        public Vector3 worldSize;              // how big it looked, in metres
-        public Vector3 smoothedWorldSize;      // what the glow is drawn at
+        public Vector3 worldSize = new Vector3(0.25f, 0.25f, 0.25f);          // newest raw estimate
+        public Vector3 smoothedWorldSize = new Vector3(0.25f, 0.25f, 0.25f);  // what the highlight is scaled to
         public float lastSeenTime;
         public int consecutiveHits;
         public int totalHits;
@@ -43,7 +43,7 @@ namespace CutOnce.Vision
         public float associationMaxDistance = 0.75f;
 
         [Tooltip("Detections needed before an object becomes visible. Suppresses one-frame false positives.")]
-        public int hitsBeforeVisible = 2;
+        public int hitsBeforeVisible = 3;
 
         [Tooltip("How long an object survives without being re-detected.")]
         public float keepAliveSeconds = 1.5f;
@@ -60,9 +60,11 @@ namespace CutOnce.Vision
         private readonly List<TrackedObject> _objects = new();
         private int _nextId = 1;
 
-        /// <summary>Fold one located detection into the tracked set.</summary>
-        public TrackedObject Observe(in DetectedObject detection, Vector3 world) => Observe(detection, world, Vector3.zero);
+        /// <summary>Older callers and diagnostics: position only, a box-ish default size.</summary>
+        public TrackedObject Observe(in DetectedObject detection, Vector3 world)
+            => Observe(detection, world, new Vector3(0.25f, 0.25f, 0.25f));
 
+        /// <summary>Fold one located detection into the tracked set.</summary>
         public TrackedObject Observe(in DetectedObject detection, Vector3 world, Vector3 worldSize)
         {
             var now = Time.time;
@@ -88,15 +90,16 @@ namespace CutOnce.Vision
                 // not the object teleporting. Count the sighting, ignore the position.
                 var jumped = Vector3.Distance(match.smoothedWorldPosition, world) > jumpRejectDistance;
                 match.worldPosition = world;
+                match.worldSize = worldSize;
                 if (!jumped)
+                {
                     match.smoothedWorldPosition = Vector3.Lerp(match.smoothedWorldPosition, world, positionSmoothing);
+                    // Size rides the same smoothing and the same jump gate: a bad depth batch mis-sizes
+                    // exactly when it mis-places, so both are rejected together.
+                    match.smoothedWorldSize = Vector3.Lerp(match.smoothedWorldSize, worldSize, positionSmoothing);
+                }
             }
 
-            if (worldSize != Vector3.zero)
-            {
-                match.worldSize = worldSize;
-                match.smoothedWorldSize = match.smoothedWorldSize == Vector3.zero ? worldSize : Vector3.Lerp(match.smoothedWorldSize, worldSize, positionSmoothing);
-            }
             match.className = detection.className;
             match.confidence = Mathf.Max(match.confidence * 0.9f, detection.confidence);
             match.lastSeenTime = now;
