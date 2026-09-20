@@ -31,6 +31,11 @@ namespace CutOnce.Copilot.Voice
             }
             _device = Microphone.devices[0];
             _clip = Microphone.Start(_device, false, MaxSeconds, SampleRate);
+            if (_clip == null)
+            {
+                Debug.LogError("[Copilot] the microphone could not start. Check the RECORD_AUDIO permission.");
+                return false;
+            }
             _startedAt = Time.realtimeSinceStartup;
             IsRecording = true;
             return true;
@@ -45,11 +50,23 @@ namespace CutOnce.Copilot.Voice
             IsRecording = false;
             if (_clip == null || written <= 0) return null;
 
-            var samples = new float[written * _clip.channels];
+            int channels = _clip.channels;
+            var samples = new float[written * channels];
             _clip.GetData(samples, 0);
             Destroy(_clip);
             _clip = null;
-            return EncodeWav(samples, SampleRate, 1);
+            if (channels <= 1) return EncodeWav(samples, SampleRate, 1);
+
+            // Speech recognition expects mono. Some Windows/Link microphones expose two channels; declaring their
+            // interleaved samples as mono doubles the apparent duration and can turn speech into rhythmic noise.
+            var mono = new float[written];
+            for (int frame = 0; frame < written; frame++)
+            {
+                float sum = 0f;
+                for (int channel = 0; channel < channels; channel++) sum += samples[frame * channels + channel];
+                mono[frame] = sum / channels;
+            }
+            return EncodeWav(mono, SampleRate, 1);
         }
 
         public void Cancel()

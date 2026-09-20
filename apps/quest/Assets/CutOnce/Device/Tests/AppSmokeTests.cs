@@ -37,7 +37,7 @@ namespace CutOnce.Device.PlayTests
         {
             LogAssert.ignoreFailingMessages = false;
             var app = Type.GetType("CutOnce.Device.CutOnceApp, Assembly-CSharp");
-            foreach (var type in new[] { app, typeof(CutOnce.Copilot.CopilotController), typeof(AssemblyView), typeof(HudController), typeof(SelectionController) })
+            foreach (var type in new[] { app, typeof(CutOnce.Copilot.CopilotController), typeof(AssemblyView), typeof(HudController), typeof(VoiceAssistantHud), typeof(SelectionController) })
                 if (type != null)
                     foreach (var found in UnityEngine.Object.FindObjectsByType(type, FindObjectsInactive.Include, FindObjectsSortMode.None))
                         UnityEngine.Object.Destroy(((Component)found).gameObject);
@@ -61,9 +61,17 @@ namespace CutOnce.Device.PlayTests
                 Assert.That(assembly.Views.Count, Is.EqualTo(0), "the app ships no plan: nothing is drawn until Kit builds something");
                 Assert.That(UnityEngine.Object.FindAnyObjectByType<HudController>(), Is.Not.Null);
                 var status = GameObject.Find("[HUD]").transform.Find("status").GetComponent<UnityEngine.UI.Text>().text;
-                // Nothing is built, so the HUD's job is to say how to start: one button, and Kit does the rest.
-                Assert.That(status, Does.Contain("A"), "the idle HUD must name the button that talks to Kit");
-                Assert.That(status, Is.EqualTo(type.GetField("IdleHint").GetValue(null)));
+                var voiceHud = UnityEngine.Object.FindAnyObjectByType<VoiceAssistantHud>();
+                Assert.That(voiceHud, Is.Not.Null, "the voice assistant needs its own always-visible HUD");
+                var hint = voiceHud.transform.Find("hint").GetComponent<UnityEngine.UI.Text>().text;
+                // Kit's instructions belong to the view-locked voice HUD, not the task panel beside a table or build.
+                Assert.That(hint, Does.Contain("A"), "the voice HUD must name the button that talks to Kit");
+                Assert.That(hint, Is.EqualTo(type.GetField("IdleHint").GetValue(null)));
+                Assert.That(status, Does.Not.Contain("Kit"));
+                Assert.That(voiceHud.transform.Find("answer").GetComponent<UnityEngine.UI.Text>().text, Does.Contain("What can I build"),
+                    "the startup voice tip must move with the rest of Kit's UI");
+                Assert.That(GameObject.Find("[HUD]").transform.Find("toast").GetComponent<UnityEngine.UI.Text>().text, Does.Not.Contain("What can I build"));
+                Assert.That(voiceHud.transform.parent, Is.SameAs(go.transform), "the app owns and cleans up its voice HUD");
                 UnityEngine.Object.Destroy(go);
             }
         }

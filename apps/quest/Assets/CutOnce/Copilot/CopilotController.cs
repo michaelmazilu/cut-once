@@ -81,21 +81,37 @@ namespace CutOnce.Copilot
             // Frozen on press: the answer must be about what they were looking at when they asked.
             _pressFrame = CaptureNow();
             _pressSelection = Selection.Of(_host);
-            if (!mic.Begin()) { _pressFrame = default; return; }
+            if (mic == null || !mic.Begin())
+            {
+                _pressFrame = default;
+                _host.ShowCopilotActivity(CopilotActivity.Idle);
+                OnFailed("the microphone could not start; check microphone permission");
+                return;
+            }
             IsListening = true;
+            _host.ShowCopilotActivity(CopilotActivity.Listening);
+            Debug.Log($"[Copilot] listening started; frame={_pressFrame.IsValid}, selected={_pressSelection.PartId ?? "none"}.");
         }
 
         private void EndListening()
         {
             IsListening = false;
+            _host.ShowCopilotActivity(CopilotActivity.Thinking);
             byte[] wav = mic.End();
             CameraFrame frame = _pressFrame;
             _pressFrame = default; // never reused by a later question
             if (wav == null || wav.Length < 1000)
             {
-                Debug.Log("[Copilot] nothing recorded; ignoring.");
+                _host.ShowCopilotActivity(CopilotActivity.Idle);
+                Debug.LogWarning("[Copilot] nothing recorded; microphone returned an empty clip.");
+                _host.ShowAnswer(new CopilotResponseDto
+                {
+                    answer_text = "I didn't hear anything. Press A, say it, then press A again.",
+                    needs_clarification = true, highlight_parts = new string[0], drawing_refs = new DrawingRefDto[0],
+                });
                 return;
             }
+            Debug.Log($"[Copilot] listening ended; captured {wav.Length} WAV bytes, sending.");
             StartCoroutine(Send(wav, null, frame, _pressSelection));
         }
 
@@ -108,6 +124,8 @@ namespace CutOnce.Copilot
             if (!frame.IsValid) Debug.LogWarning("[Copilot] no camera frame; asking without one.");
             var visible = frame.IsValid ? PartProjector.Project(_host.PartsForProjection(), frame) : new List<ProjectedPart>();
             string context = CopilotClient.BuildContextJson(_host, selection, visible, frame.Intrinsics, scriptedQueryId);
+            _host.ShowCopilotActivity(CopilotActivity.Thinking);
+            Debug.Log($"[Copilot] query sending; assembly={_host.AssemblyId}, frame={frame.IsValid}, visible_parts={visible.Count}.");
 
             yield return _client.Query(
                 _host.AssemblyId, context, wav ?? MicRecorder.EncodeWav(new float[160], MicRecorder.SampleRate, 1),
@@ -120,6 +138,7 @@ namespace CutOnce.Copilot
         private void OnFailed(string error)
         {
             IsThinking = false;
+            _host.ShowCopilotActivity(CopilotActivity.Idle);
             Debug.LogWarning("[Copilot] " + error);
             _host.ShowAnswer(new CopilotResponseDto
             {
@@ -131,10 +150,14 @@ namespace CutOnce.Copilot
         private void OnAnswer(CopilotResponseDto response)
         {
             IsThinking = false;
+            _host.ShowCopilotActivity(CopilotActivity.Idle);
 
             // Highlight first: it lands in the same frame the text appears, before any audio.
             if (response.highlight_parts != null && response.highlight_parts.Length > 0)
                 _host.Highlight(response.highlight_parts, response.highlight_style);
+            if (response.highlight_twins != null && response.highlight_twins.Length > 0)
+                _host.HighlightTwins(response.highlight_twins, response.highlight_style);
+            Debug.Log($"[Copilot] answer received; transcript=\"{response.transcript}\", parts={response.highlight_parts?.Length ?? 0}, twins={response.highlight_twins?.Length ?? 0}.");
             _host.ShowAnswer(response);
 
             if (response.HasAction)
@@ -148,6 +171,13 @@ namespace CutOnce.Copilot
                 speaker.Play(baseUrl, response.audio_url, apiToken);
                 StartCoroutine(TrackFirstAudio());
             }
+        }
+
+        private void OnDisable()
+        {
+            if (mic != null) mic.Cancel();
+            IsListening = IsThinking = false;
+            _host?.ShowCopilotActivity(CopilotActivity.Idle);
         }
 
         private IEnumerator TrackFirstAudio()

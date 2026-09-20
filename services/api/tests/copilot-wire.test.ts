@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createServer as createTcp, type AddressInfo, type Server as TcpServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Strict, type CopilotContext } from "@cutonce/schemas";
 import { REPO_ROOT } from "../src/config.js";
@@ -111,9 +112,10 @@ function question(t: App, opts: { withFrame?: boolean; mode?: "upload" | "overla
 }
 
 const run = promisify(execFile);
+const tsxCli = fileURLToPath(new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url));
 function g0(env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
-  return run("pnpm", ["exec", "tsx", "src/cli/g0-check.ts"], {
-    cwd: new URL("..", import.meta.url).pathname, timeout: 60_000,
+  return run(process.execPath, [tsxCli, "src/cli/g0-check.ts"], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 60_000,
     env: { ...process.env, OPENAI_BASE_URL: oaiUrl, OPENAI_COPILOT_MODEL: "", OPENAI_MODEL: "", ...env },
   }).then((o) => ({ code: 0, stdout: o.stdout, stderr: o.stderr }), (e: { code: number; stdout: string; stderr: string }) => e);
 }

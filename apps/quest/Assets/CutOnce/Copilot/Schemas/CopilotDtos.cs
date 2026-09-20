@@ -15,6 +15,7 @@ namespace CutOnce.Copilot
         public string transcript;
         public string answer_text;
         public string[] highlight_parts;
+        public string[] highlight_twins;
         public string highlight_style;   // pulse | path
         public DrawingRefDto[] drawing_refs;
         public CopilotActionDto action;

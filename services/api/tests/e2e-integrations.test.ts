@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -20,6 +21,7 @@ import { callKnowledgeTool } from "../src/search/tools.js";
 import { TOKEN, auth, builtEvent, makeApp } from "./helpers.js";
 
 const run = promisify(execFile);
+const tsxCli = fileURLToPath(new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url));
 const readBody = (req: IncomingMessage) => new Promise<string>((resolve) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => resolve(b)); });
 async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) {
   const server = createServer((req, res) => void handler(req, res));
@@ -225,8 +227,8 @@ describe("OpenAI on the wire (copilot schema)", () => {
 describe("pnpm elastic:setup against stand-in Kibana", () => {
   it("creates the four ES|QL tools with 9.4 types and rendered queries, then smoke-tests each (a hung tool times out and fails the run)", async () => {
     const started = Date.now();
-    const err = await run("pnpm", ["exec", "tsx", "src/cli/elastic-setup.ts"], {
-      cwd: new URL("..", import.meta.url).pathname, timeout: 60_000,
+    const err = await run(process.execPath, [tsxCli, "src/cli/elastic-setup.ts"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 60_000,
       env: { ...process.env, KIBANA_URL: kib.url, ES_API_KEY: "test-api-key", AGENT_BUILDER_MCP_URL: "", JINA_EMBED_ID: ".jina-embeddings-v5-text-small",
         JINA_RERANK_ID: ".jina-reranker-v3", SMOKE_TIMEOUT_MS: "1000" },
     }).then(() => null, (e) => e);
@@ -248,8 +250,8 @@ describe("pnpm elastic:setup against stand-in Kibana", () => {
   it("exits non-zero when Kibana rejects a tool, and treats a blank SMOKE_TIMEOUT_MS as the default", async () => {
     kibana.rejectCreate = true; kibana.hangSearch = false;
     try {
-      const err = await run("pnpm", ["exec", "tsx", "src/cli/elastic-setup.ts"], {
-        cwd: new URL("..", import.meta.url).pathname, timeout: 60_000,
+      const err = await run(process.execPath, [tsxCli, "src/cli/elastic-setup.ts"], {
+        cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 60_000,
         env: { ...process.env, KIBANA_URL: kib.url, ES_API_KEY: "test-api-key", AGENT_BUILDER_MCP_URL: "", JINA_EMBED_ID: "", JINA_RERANK_ID: "", SMOKE_TIMEOUT_MS: "" },
       }).then(() => null, (e) => e);
       expect(err?.code).toBe(1);

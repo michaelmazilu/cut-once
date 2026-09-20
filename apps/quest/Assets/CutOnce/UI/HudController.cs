@@ -7,7 +7,7 @@ namespace CutOnce.UI
 {
     /// <summary>
     /// A compact task panel: current instruction, progress, connection and the part under the pointer.
-    /// Answers and temporary notices share the panel instead of floating above and below it.
+    /// Build narration and temporary notices share the panel instead of floating above and below it.
     /// It is world-locked (a head-locked panel shakes on the cast) and built in code, so there is no prefab to break.
     /// All wording comes from Core.HudText.
     /// </summary>
@@ -17,7 +17,7 @@ namespace CutOnce.UI
         static readonly Color Panel = new Color(0.035f, 0.045f, 0.05f, 0.94f), Ink = new Color(0.92f, 0.97f, 1f, 1f), Dim = new Color(0.65f, 0.70f, 0.70f, 1f),
             Accent = new Color(0.58f, 0.82f, 0.73f, 1f), Warn = new Color(1f, 0.85f, 0.3f, 1f);
 
-        Text _title, _progress, _stepTitle, _stepBody, _part, _status, _toast, _answer, _hint;
+        Text _title, _progress, _stepTitle, _stepBody, _part, _status, _toast, _answer, _hint, _placement;
         RectTransform _bar, _barBack, _panel;
         bool _hasBuild;
         float _toastUntil, _answerUntil;
@@ -50,6 +50,7 @@ namespace CutOnce.UI
             _part = Label(root, "part", 22, 250, Width - 44, 100, 14, Ink, TextAnchor.UpperLeft);
             _toast = Label(root, "toast", 22, 0, Width - 44, 44, 14, Warn, TextAnchor.UpperLeft);
             _answer = Label(root, "answer", 22, 0, Width - 44, 100, 16, Ink, TextAnchor.UpperLeft);
+            _placement = Label(root, "placement", 22, 0, Width - 44, 96, 20, Accent, TextAnchor.UpperLeft);
             Layout();
         }
 
@@ -93,6 +94,7 @@ namespace CutOnce.UI
         }
 
         public void ShowPart(string card) { _part.text = card ?? ""; Layout(); }
+        public void ShowPlacement(string text) { _placement.text = text ?? ""; Layout(); }
         public void ShowStatus(string connection, string alignment)
         {
             _status.text = connection ?? "";
@@ -134,6 +136,7 @@ namespace CutOnce.UI
                 _answer.gameObject.SetActive(false);
                 Stack(_part, ref y, 30, 112);
             }
+            Stack(_placement, ref y, 28, 104);
             Stack(_toast, ref y, 22, 64);
             float height = y + 14;
             _panel.sizeDelta = new Vector2(Width, height);

@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { loadConfig } from "../src/config.js";
@@ -127,9 +128,10 @@ describe("jsonCall (OpenAI)", () => {
 });
 
 describe("pnpm omni:probe", () => {
-  const run = promisify(execFile);
-  const probe = (env: Record<string, string>) => run("pnpm", ["exec", "tsx", "src/cli/omni-probe.ts"], {
-    cwd: new URL("..", import.meta.url).pathname, timeout: 60_000, env: { ...process.env, OMNI_API_KEY: "", OMNI_BASE_URL: "", ...env },
+const run = promisify(execFile);
+const tsxCli = fileURLToPath(new URL("../../../node_modules/tsx/dist/cli.mjs", import.meta.url));
+  const probe = (env: Record<string, string>) => run(process.execPath, [tsxCli, "src/cli/omni-probe.ts"], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 60_000, env: { ...process.env, OMNI_API_KEY: "", OMNI_BASE_URL: "", ...env },
   }).then((o) => ({ code: 0, stdout: o.stdout }), (e: { code: number; stdout: string }) => ({ code: e.code, stdout: e.stdout }));
 
   it("checks text, a photo and a voice clip in both encodings, and passes against a working server", async () => {

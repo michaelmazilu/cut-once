@@ -3,6 +3,8 @@ using UnityEngine;
 
 namespace CutOnce.Copilot
 {
+    public enum CopilotActivity { Idle, Listening, Thinking }
+
     /// <summary>One camera frame, already encoded, with everything needed to project 3D into it.</summary>
     public readonly struct CameraFrame
     {
@@ -140,6 +142,12 @@ namespace CutOnce.Copilot
 
         /// <summary>Pulse or path-highlight these parts. Called the moment the answer arrives, before the audio.</summary>
         void Highlight(string[] partIds, string style);
+
+        /// <summary>Highlight real objects found by build mode. Their IDs are o1, o2, ... rather than plan part IDs.</summary>
+        void HighlightTwins(string[] twinIds, string style);
+
+        /// <summary>Show immediate hold-to-talk feedback independently of the eventual answer.</summary>
+        void ShowCopilotActivity(CopilotActivity activity);
 
         /// <summary>Show the answer text and the source card on the HUD.</summary>
         void ShowAnswer(CopilotResponseDto response);

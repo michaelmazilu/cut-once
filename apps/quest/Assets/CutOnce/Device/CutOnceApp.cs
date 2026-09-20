@@ -38,7 +38,7 @@ namespace CutOnce.Device
 
         ServerConfig _config; HologramPalette _palette; ApiClient _api;
         BuildStateStore _store; SyncEngine _sync; StreamClient _stream;
-        AssemblyView _assembly; AlignmentController _alignment; ProofOverlay _proof; SelectionController _selection; HudController _hud; QuestInput _input;
+        AssemblyView _assembly; AlignmentController _alignment; ProofOverlay _proof; SelectionController _selection; HudController _hud; VoiceAssistantHud _voiceHud; QuestInput _input;
         Material _material;
         CutOnce.Room.RoomWorkspace _roomWorkspace;
         readonly HashSet<string> _highlighted = new HashSet<string>();
@@ -82,7 +82,8 @@ namespace CutOnce.Device
             _selection.Init(_input, _assembly, () => _alignment.State == AlignmentState.Locked, _material);
             _selection.Changed += _ => _dirty = true;
             _hud = HudController.Create(null);
-            _hud.ShowStatus("Starting…", IdleHint);
+            _hud.ShowStatus("Starting…", "");
+            _voiceHud = VoiceAssistantHud.Create(transform, IdleHint);
             _roomWorkspace = gameObject.AddComponent<CutOnce.Room.RoomWorkspace>();
             _roomWorkspace.ActiveChanged += active =>
             {
@@ -93,10 +94,11 @@ namespace CutOnce.Device
                 _hud.gameObject.SetActive(!active);
                 _waitForMarkRelease = true;
             };
-            _hud.Toast("Try asking: What can I build?", 6f);
+            _voiceHud.ShowTip("Try asking: What can I build?", 6f);
             // Build mode ("what can I build?"): off until a scan starts it, so other runs behave exactly as before.
             _build = gameObject.AddComponent<BuildMode>();
             _build.Init(_config, _api, _sync, _store, _assembly, _alignment, _input, surface, _hud, _material, _palette);
+            gameObject.AddComponent<LivePlacementCheck>().Init(_assembly, _alignment, _selection, _build, _hud);
         }
 
         void Start()
@@ -190,7 +192,7 @@ namespace CutOnce.Device
 
         void OnAlignmentChanged()
         {
-            _hud.ShowStatus(_sync.StatusLine, NothingBuilt ? IdleHint : _alignment.Hint);
+            _hud.ShowStatus(_sync.StatusLine, NothingBuilt ? "" : _alignment.Hint);
             // While build mode's pieces fly in from their real objects the hologram's bounds are half the room: the HUD was
             // stood by the lock itself, with every piece at rest, and stays there.
             if (_alignment.State == AlignmentState.Locked) { if (_build == null || !_build.PiecesInFlight) StandHud(); _waitForMarkRelease = true; }   // the B that finished a touch alignment is not a mark
@@ -217,13 +219,13 @@ namespace CutOnce.Device
         void Refresh()
         {
             _dirty = false;
-            if (!_store.IsLoaded) { _hud.ShowStatus(_sync.StatusLine, IdleHint); return; }
+            if (!_store.IsLoaded) { _hud.ShowStatus(_sync.StatusLine, ""); return; }
             var lit = Time.time < _highlightUntil ? _highlighted : null;
             _assembly.Show(VisualStateResolver.Resolve(_store.Plan, _store.Current, _selection.SelectedPartId, lit), _palette);
             _hud.ShowState(_store.Plan, _store.Current, MaterialList.For(_store.Plan, _store.Current), _store.Events, _assembly.ScaleLabel);
             var part = _assembly.ViewOf(_selection.SelectedPartId)?.Part;
             _hud.ShowPart(part != null && _store.Current.parts.TryGetValue(part.part_id, out var status) ? HudText.PartCard(_store.Plan, part, status, _store.Current) : "");
-            _hud.ShowStatus(_sync.StatusLine, NothingBuilt ? IdleHint : _alignment.State == AlignmentState.Locked ? "" : _alignment.Hint);
+            _hud.ShowStatus(_sync.StatusLine, NothingBuilt || _alignment.State == AlignmentState.Locked ? "" : _alignment.Hint);
         }
 
         // ── every frame ──────────────────────────────────────────────────────────────────────────────────────────
@@ -237,11 +239,15 @@ namespace CutOnce.Device
             if (_highlighted.Count > 0 && Time.time >= _highlightUntil) { _highlighted.Clear(); _dirty = true; }
             if (_alignment.State == AlignmentState.Locked) ReadMarkButton();
             while (_permissionAnswers.TryDequeue(out var answer))
-                if (!answer.granted) _hud.Toast(answer.permission == QuestPermissions.Camera
-                    ? "Camera not allowed: the copilot answers without seeing the desk. Allow it in Settings > Privacy."
-                    : answer.permission == QuestPermissions.Scene
-                    ? "Spatial data not allowed: build mode can't measure objects. Allow it in Settings > Privacy."
-                    : "Microphone not allowed, so Kit cannot hear you. Allow it in Settings > Privacy, then start the app again.", 6f);
+                if (!answer.granted)
+                {
+                    if (answer.permission == QuestPermissions.Scene)
+                        _hud.Toast("Spatial data not allowed: build mode can't measure objects. Allow it in Settings > Privacy.", 6f);
+                    else
+                        _voiceHud.ShowNotice(answer.permission == QuestPermissions.Camera
+                            ? "Camera not allowed: Kit can answer without seeing the desk. Allow it in Settings > Privacy."
+                            : "Microphone not allowed: allow it in Settings > Privacy.", 6f);
+                }
             // X on the left controller: a press scans this view (what "what can I build?" does), holding it for a second leaves build mode.
             var x = _scanButton.Update(OVRInput.GetDown(OVRInput.RawButton.X), OVRInput.Get(OVRInput.RawButton.X), OVRInput.GetUp(OVRInput.RawButton.X), Time.deltaTime);
             if (x != ButtonGesture.None) _build.OnScanButton(x);
@@ -303,18 +309,28 @@ namespace CutOnce.Device
             _dirty = true;
         }
 
+        public void HighlightTwins(string[] twinIds, string style) => _build?.HighlightTwins(twinIds);
+
+        public void ShowCopilotActivity(CopilotActivity activity)
+        {
+            if (_voiceHud != null)
+                _voiceHud.ShowActivity(activity == CopilotActivity.Listening ? "listening" : activity == CopilotActivity.Thinking ? "thinking" : "idle");
+        }
+
         /// <summary>The answer, then the drawing it came from (the "source card": sheet and page).</summary>
         public void ShowAnswer(CopilotResponseDto response)
         {
+            if (_voiceHud == null) return;
             var source = response?.drawing_refs != null && response.drawing_refs.Length > 0 ? response.drawing_refs[0] : null;
-            _hud.ShowAnswer(HudText.AnswerCard(response?.answer_text, source?.title, source?.sheet_id, source?.page ?? 0));
+            _voiceHud.ShowAnswer(HudText.AnswerCard(response?.answer_text, source?.title, source?.sheet_id, source?.page ?? 0));
         }
 
         public void OnActionApplied(CopilotActionDto action)
         {
             if (action?.type == "start_scan") { _build.StartScan(); return; }   // "What can I build?": the headset scans, the server does the rest
             // The server already wrote the event; it arrives on the stream. This only tells the operator what happened.
-            if (action?.type == "mark_state") _hud.Toast($"Voice: {action.part_ids?.Length ?? 0} part(s) → {action.new_state} · say \"undo\" to revert", 2f);
+            if (action?.type == "mark_state" && _voiceHud != null)
+                _voiceHud.ShowNotice($"Voice: {action.part_ids?.Length ?? 0} part(s) -> {action.new_state} - say \"undo\" to revert", 2f);
         }
 
         public void StepNav(string direction)

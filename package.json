@@ -22,6 +22,8 @@
     "extract:eval": "pnpm -F @cutonce/api exec tsx src/cli/extract-eval.ts",
     "copilot:fixtures": "pnpm -F @cutonce/api exec tsx src/cli/copilot-fixtures.ts",
     "g0": "pnpm -F @cutonce/api exec tsx src/cli/g0-check.ts",
+    "copilot:smoke": "pnpm -F @cutonce/api exec tsx src/cli/copilot-smoke.ts",
+    "build:smoke": "pnpm -F @cutonce/api exec tsx src/cli/build-smoke.ts",
     "omni:probe": "pnpm -F @cutonce/api exec tsx src/cli/omni-probe.ts",
     "sync:fixtures": "node scripts/sync-fixtures.mjs",
     "gen:fixtures": "pnpm -F @cutonce/project-model exec tsx scripts/gen-fixtures.ts",

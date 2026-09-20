@@ -130,4 +130,6 @@ if (!g0.ok && !g0.skipped) {
   console.error("to a vision-capable model and run pnpm g0 again (it checks that same model), and tell the team.");
 }
 // A missing key skips its checks; only a check that ran and failed fails the command.
-process.exit(results.some((r) => !r.ok && !r.skipped) ? 1 : 0);
+// Let SDK keep-alive sockets close naturally. A hard process.exit() can trip libuv's UV_HANDLE_CLOSING assertion
+// on Windows after otherwise successful OpenAI requests, causing the preflight to report 0xC0000409.
+process.exitCode = results.some((r) => !r.ok && !r.skipped) ? 1 : 0;

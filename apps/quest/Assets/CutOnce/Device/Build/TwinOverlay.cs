@@ -16,7 +16,10 @@ namespace CutOnce.Device
     {
         public const int MaxShown = 40;
         readonly Dictionary<string, TwinDto> _twins = new Dictionary<string, TwinDto>();
+        readonly Dictionary<string, PartView> _views = new Dictionary<string, PartView>();
+        readonly Dictionary<string, BaseVisual> _baseLooks = new Dictionary<string, BaseVisual>();
         Material _material; HologramPalette _palette;
+        float _highlightUntil;
 
         public void Init(Material material, HologramPalette palette) { _material = material; _palette = palette; }
 
@@ -43,14 +46,37 @@ namespace CutOnce.Device
                 var built = ShapeFactory.Build(part);
                 if (built?.Mesh == null) continue;                              // a shape the headset cannot draw
                 _twins[t.twin_id] = t;
-                PartView.Create(part, built, transform, _material, pickable: false).Apply(inventory.labelled && IsNamed(t) ? named : unnamed);
+                var baseLook = inventory.labelled && IsNamed(t) ? BaseVisual.CURRENT_STEP : BaseVisual.FUTURE;
+                var view = PartView.Create(part, built, transform, _material, pickable: false);
+                _views[t.twin_id] = view; _baseLooks[t.twin_id] = baseLook;
+                view.Apply(baseLook == BaseVisual.CURRENT_STEP ? named : unnamed);
                 WorldLabel.Create(transform, Caption(t), ModelSpace.Point(t.position) + Vector3.up * (float)(Height(t.shape) / 2 + 0.05));
             }
+        }
+
+        public void Highlight(IEnumerable<string> twinIds, float seconds)
+        {
+            var lit = new HashSet<string>(twinIds ?? new string[0]);
+            foreach (var pair in _views)
+            {
+                var visual = new PartVisual { Base = _baseLooks[pair.Key] };
+                if (lit.Contains(pair.Key)) visual.Modifiers.Add(VisualModifier.HIGHLIGHTED);
+                pair.Value.Apply(_palette.StyleFor(visual));
+            }
+            _highlightUntil = lit.Count > 0 ? Time.time + seconds : 0f;
+        }
+
+        void Update()
+        {
+            if (_highlightUntil <= 0f || Time.time < _highlightUntil) return;
+            _highlightUntil = 0f;
+            Highlight(null, 0f);
         }
 
         public void Clear()
         {
             _twins.Clear();
+            _views.Clear(); _baseLooks.Clear(); _highlightUntil = 0f;
             DestroyChildren(transform);
         }
 
