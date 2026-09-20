@@ -26,6 +26,8 @@ namespace CutOnce.Vision
     /// </summary>
     public class YoloDetector : MonoBehaviour
     {
+        public const float DefaultMaxInferencesPerSecond = 15f;
+
         [Header("Model (Meta's yolov9sentis.sentis + its COCO labels)")]
         public ModelAsset modelAsset;
         public TextAsset labelsAsset;
@@ -39,8 +41,8 @@ namespace CutOnce.Vision
         [Tooltip("Abandon a frame whose readback never lands, rather than spinning the frame loop forever.")]
         public float readbackTimeoutSeconds = 8f;
 
-        [Tooltip("Upper bound on inference rate. The model takes as long as it takes; this only stops us queueing faster than that. A few a second keep the labels live without cooking an XR2.")]
-        public float maxInferencesPerSecond = 8f;
+        [Tooltip("Target upper bound for continuous tracking. Only one inference is ever in flight, so slower Quest hardware automatically runs at the fastest rate it can sustain instead of building a frame backlog.")]
+        public float maxInferencesPerSecond = DefaultMaxInferencesPerSecond;
 
         [Tooltip("Only for a model whose head already gives corners (x1,y1,x2,y2). YOLO gives centre+size.")]
         public bool cornerBoxes;
@@ -125,6 +127,9 @@ namespace CutOnce.Vision
                 var minInterval = maxInferencesPerSecond > 0f ? 1f / maxInferencesPerSecond : 0f;
                 // Paused, not stopped. Unity does not stop a coroutine when its component is disabled, and Start()
                 // runs once per component, so leaving the loop here would end detection for the rest of the session.
+                // RunInference is yielded directly, which guarantees there is only one inference in flight. If an
+                // inference takes longer than this interval, the next fresh frame starts immediately when it ends:
+                // 15/s is the target, while the device's sustained local throughput is the effective rate.
                 if (Paused || _camera == null || !_camera.IsReady || !_camera.HasFreshFrame ||
                     Time.time - _lastInferenceStartedAt < minInterval)
                 {
