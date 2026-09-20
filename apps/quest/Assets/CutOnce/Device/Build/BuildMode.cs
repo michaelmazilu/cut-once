@@ -284,7 +284,7 @@ namespace CutOnce.Device
         {
             if (_flow.Phase != BuildPhase.Assembling) return;
             _flow.OnAssembled();
-            _twins.Clear();
+            // Keep every scanned object outlined after the design is chosen; leaving build mode owns the cleanup.
             SpeakCurrentStep();
         }
 

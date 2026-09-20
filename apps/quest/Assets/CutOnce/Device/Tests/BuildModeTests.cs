@@ -63,6 +63,9 @@ namespace CutOnce.Device.PlayTests
             Send(mode, Inventory(canInRoom));
             Send(mode, ideas);
             yield return null;
+            var twins = GameObject.Find("[BuildTwins]").transform;
+            int highlightedObjectCount = twins.childCount;
+            Assert.That(highlightedObjectCount, Is.GreaterThan(0), "the scanned objects were not highlighted before choosing a design");
 
             // Picking posts to the server, which starts a run of the idea's plan; the stream then makes the app load it.
             // Locking saves a spatial anchor, and anchors only exist on the headset: in the Editor Meta's OVRSpatialAnchor
@@ -99,7 +102,7 @@ namespace CutOnce.Device.PlayTests
             Assert.That(Vector3.Distance(can.transform.localPosition, new Vector3(0f, 0.0785f, 0f)), Is.LessThan(1e-5f), "and ends exactly in its place in the design (the plan's [0, 0.0785, 0])");
             Assert.That(Quaternion.Angle(can.transform.localRotation, Quaternion.identity), Is.LessThan(0.01f));
             yield return null;
-            Assert.That(GameObject.Find("[BuildTwins]").transform.childCount, Is.EqualTo(0), "the outlines over the real objects go once the pieces have left them");
+            Assert.That(twins.childCount, Is.EqualTo(highlightedObjectCount), "choosing a design removed some of the scanned object highlights");
             Assert.That(ModeOf(app), Is.EqualTo("build"));
 
             // B with nothing pointed at: the whole step is done, and the walkthrough moves on.
