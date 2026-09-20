@@ -8,8 +8,8 @@
 //
 // Occlusion semantics verified against the SDK 205 source (EnvironmentOcclusion.cginc):
 // CalculateEnvironmentDepthOcclusion(P) is 1 when the environment is farther than P, 0 when nearer.
-// With neither occlusion keyword (Editor, Link, no depth) both calls return 1, paint would be 0 —
-// so that case draws a faint volume instead, and C# falls back to the box look anyway.
+// With neither occlusion keyword (Editor, Link, or while depth is unavailable), this shader draws
+// nothing and C# swaps the renderer back to the ordinary box look.
 //
 // AGENTS rule 4: single-pass instanced stereo macros throughout (the reprojection uses
 // unity_StereoEyeIndex, so the stereo setup is not optional here). Rule 5: alpha blends

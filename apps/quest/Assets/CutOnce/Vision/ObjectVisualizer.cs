@@ -124,6 +124,9 @@ namespace CutOnce.Vision
             var follow = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
             t.position = Vector3.Lerp(t.position, o.smoothedWorldPosition, follow);
             var cube = cached.highlight.transform;
+            // Depth is supported but arrives late (first seconds, after sleep). Until it does, and
+            // whenever it drops, this object wears the box look; the moment it is back, the paint.
+            var paintNow = _surface != null && _depth != null && _depth.IsDepthAvailable;
             var targetSize = paintNow ? o.smoothedWorldSize * surfacePad : o.smoothedWorldSize;
             cube.localScale = Vector3.Lerp(cube.localScale, targetSize, follow);
             // The padding grows sideways and upward only, and the bottom is lifted a touch: the desk a
@@ -131,9 +134,6 @@ namespace CutOnce.Vision
             var lift = paintNow ? surfaceLift : 0f;
             cube.localPosition = new Vector3(0f, (cube.localScale.y - o.smoothedWorldSize.y) * 0.5f + lift, 0f);
 
-            // Depth is supported but arrives late (first seconds, after sleep). Until it does, and
-            // whenever it drops, this object wears the box look; the moment it is back, the paint.
-            var paintNow = _surface != null && _depth != null && _depth.IsDepthAvailable;
             if (cached.lastFocused != focused || cached.surfaceOn != paintNow)
             {
                 cached.lastFocused = focused;
