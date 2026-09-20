@@ -7,17 +7,23 @@ network with no VM, DNS, open ports or certificates. HTTPS also means the Unity 
 ```bash
 brew install cloudflared
 pnpm install
+pnpm copilot:setup
 ```
 
-## Every time (two terminal windows on the server laptop)
+## Every time (two terminal windows on the server laptop, then one USB configuration step)
 ```bash
-pnpm serve:local   # window 1: builds the web app, starts the API on port 8080
-pnpm tunnel        # window 2: prints https://<words>.trycloudflare.com and checks /health through it
+pnpm quest:serve    # window 1: builds the web app, starts the API on port 8080
+pnpm quest:tunnel   # window 2: opens HTTPS and verifies /health plus the API token
+pnpm quest:connect  # with Quest on USB: pushes the URL/token and relaunches the installed app
 ```
 
-- `serve:local` creates `.env.local` from `.env.example` on first run and fills in a random `API_TOKEN`, which is
-  kept across restarts. The server refuses to start without one. Put the same token in the headset's operator panel
-  (`grep API_TOKEN .env.local`). Add the Elastic, OpenAI and ElevenLabs keys to `.env.local` when you have them;
+`quest:connect` writes the private configuration to the app's persistent data, which wins over anything bundled in
+the APK. Run it again whenever a quick-tunnel address changes. Without this step, `127.0.0.1` on a physical Quest
+means the headset itself, not the server laptop; the app now reports that mistake visibly instead of failing silently.
+
+- `quest:serve` creates `.env.local` from `.env.example` on first run and fills in a random `API_TOKEN`, which is
+  kept across restarts. The server refuses to start without one. `quest:connect` copies that token without printing it.
+  Add the Elastic, OpenAI and ElevenLabs keys to `.env.local` when you have them;
   `/health` shows them as `unset` until then.
 - Open `<address>/health` in the Quest's browser. The Director page is `<address>/director`.
 - **Restart the server freely** (after a `git pull`, say): the address stays the same. Only restarting `pnpm tunnel`

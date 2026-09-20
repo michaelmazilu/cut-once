@@ -49,6 +49,30 @@ namespace CutOnce.Copilot
 
         private void Awake()
         {
+            Bind();
+        }
+
+        /// <summary>
+        /// A scene may already contain Rhythm's [Copilot] prefab. Runtime server settings and the app host cannot be
+        /// serialized into that prefab, so CutOnceApp calls this before the first Update. Rebinding is intentional:
+        /// otherwise a placed prefab silently keeps localhost/dev-token and build mode borrows its dead camera source.
+        /// </summary>
+        public void Configure(string url, string token, MonoBehaviour frames, MonoBehaviour host, MonoBehaviour pushToTalk,
+                              MicRecorder recorder, PcmStreamPlayer streamPlayer)
+        {
+            baseUrl = url;
+            apiToken = token;
+            frameSourceBehaviour = frames;
+            hostBehaviour = host;
+            pushToTalkBehaviour = pushToTalk;
+            mic = recorder;
+            speaker = streamPlayer;
+            Bind();
+            Debug.Log($"[Copilot] configured; server={SafeServerName(baseUrl)}, frame={_frames != null}, host={_host != null}, ptt={_ptt != null}, mic={mic != null}, speaker={speaker != null}.");
+        }
+
+        private void Bind()
+        {
             _frames = frameSourceBehaviour as ICameraFrameSource;
             _host = hostBehaviour as ICopilotHost;
             _ptt = pushToTalkBehaviour as IPushToTalk;
@@ -56,6 +80,12 @@ namespace CutOnce.Copilot
             if (_frames == null) Debug.LogError("[Copilot] frameSourceBehaviour does not implement ICameraFrameSource.");
             if (_host == null) Debug.LogError("[Copilot] hostBehaviour does not implement ICopilotHost.");
             if (_ptt == null) Debug.LogError("[Copilot] pushToTalkBehaviour does not implement IPushToTalk.");
+        }
+
+        private static string SafeServerName(string url)
+        {
+            try { return new System.Uri(url).Authority; }
+            catch { return "invalid"; }
         }
 
         private void Update()

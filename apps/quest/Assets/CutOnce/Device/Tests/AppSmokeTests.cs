@@ -136,7 +136,7 @@ namespace CutOnce.Device.PlayTests
         }
 
         [UnityTest]
-        public IEnumerator ACopilotPlacedInTheSceneStillGetsItsPermissionsAskedFor()
+        public IEnumerator ACopilotPlacedInTheSceneIsRewiredAndStillGetsItsPermissionsAskedFor()
         {
             // Rhythm's [Copilot] prefab in Main.unity is the other way a copilot arrives; it needs the camera and mic too.
             LogAssert.ignoreFailingMessages = true;                            // this bare copilot has no host or camera wired
@@ -158,9 +158,40 @@ namespace CutOnce.Device.PlayTests
 
             Assert.That((int)permissions.GetProperty("RequestCount").GetValue(null), Is.EqualTo(before + 1),
                 "the app asked for the camera and microphone for the copilot already in the scene");
+            Assert.That(placed.hostBehaviour, Is.SameAs(app), "a placed prefab kept its empty/stale host");
+            Assert.That(placed.frameSourceBehaviour, Is.InstanceOf<CutOnce.Copilot.Capture.FixtureFrameSource>(),
+                "build scans and Kit must share a working camera source");
+            Assert.That(placed.pushToTalkBehaviour, Is.InstanceOf<CutOnce.Copilot.IPushToTalk>());
+            Assert.That(placed.mic, Is.Not.Null);
+            Assert.That(placed.speaker, Is.Not.Null);
             LogAssert.ignoreFailingMessages = false;
             UnityEngine.Object.Destroy(placed.gameObject);
             UnityEngine.Object.Destroy(go);
+        }
+
+        [UnityTest]
+        public IEnumerator AnUnmeasuredRecognitionKeepsItsLabelButNotItsGuessedBox()
+        {
+            var go = new GameObject("[Vision] fallback test");
+            var visualizer = go.AddComponent<CutOnce.Vision.ObjectVisualizer>();
+            var tracked = new CutOnce.Vision.TrackedObject
+            {
+                id = 1, className = "bottle", confidence = 0.9f, visible = true,
+                smoothedWorldPosition = new Vector3(0f, 1f, 1f), smoothedWorldSize = new Vector3(0.2f, 0.4f, 0.2f),
+            };
+
+            visualizer.Show(tracked, focused: false, showGeometry: false);
+            yield return null;
+
+            var highlight = tracked.visual.transform.Find("Highlight").GetComponent<MeshRenderer>();
+            var label = tracked.visual.transform.Find("Label").GetComponent<TextMesh>();
+            Assert.That(highlight.enabled, Is.False, "an unmeasured estimate was drawn as if it were trustworthy geometry");
+            Assert.That(label.text, Does.Contain("BOTTLE"), "measurement failure hid passive recognition too");
+
+            visualizer.Show(tracked, focused: false, showGeometry: true);
+            Assert.That(highlight.enabled, Is.True, "a later successful measurement did not restore the highlight");
+            UnityEngine.Object.Destroy(go);
+            yield return null;
         }
     }
 }

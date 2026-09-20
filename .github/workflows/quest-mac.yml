@@ -53,6 +53,8 @@ jobs:
           echo "UNITY_PATH=$editor" >> "$GITHUB_ENV"
           echo "Building commit $GITHUB_SHA with Unity $version" >> "$GITHUB_STEP_SUMMARY"
       - run: pnpm install --frozen-lockfile
+      - name: Enforce Quest three-pillar contract
+        run: pnpm quest:pillars
       - name: Apply Quest settings
         run: caffeinate -i pnpm quest:setup
       - name: Compile, test, and check Quest readiness

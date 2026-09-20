@@ -39,7 +39,7 @@ function setup(voice: boolean) {
   const after = prepareEnv(before, voice);
   if (!existsSync(ENV) || after !== before) writeFileSync(ENV, after, { mode: 0o600 });
   console.log(voice ? "Live copilot enabled in .env.local. Existing keys and model choices preserved." : "Server configuration ready.");
-  if (voice) console.log("Add OPENAI_API_KEY, ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID to .env.local, then run pnpm copilot:check.");
+  if (voice) console.log("Add OPENAI_API_KEY and ELEVENLABS_API_KEY to .env.local, then run pnpm copilot:check. ELEVENLABS_VOICE_ID is optional; the server has a safe default.");
 }
 
 export function serverUrl(raw: string): string {
@@ -57,7 +57,7 @@ export function headsetConfig(url: string, token: string, device = "quest-1") {
 export function voiceProblems(env: Env): string[] {
   const issues: string[] = [];
   if (env.COPILOT_MODE !== "live") issues.push("COPILOT_MODE must be live; off disables the route and fake ignores your actual question.");
-  for (const key of ["API_TOKEN", "OPENAI_API_KEY", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"])
+  for (const key of ["API_TOKEN", "OPENAI_API_KEY", "ELEVENLABS_API_KEY"])
     if (!env[key]?.trim()) issues.push(`${key} is missing in .env.local.`);
   if (env.API_TOKEN === "dev-token") issues.push("Replace the default API_TOKEN (pnpm copilot:setup).");
   return issues;

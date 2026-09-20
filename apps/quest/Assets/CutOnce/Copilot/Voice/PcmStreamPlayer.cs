@@ -16,6 +16,8 @@ namespace CutOnce.Copilot.Voice
     public class PcmStreamPlayer : MonoBehaviour
     {
         public int sampleRate = 22050;
+        [Tooltip("Stop a stalled tunnel/audio stream instead of leaving Kit permanently marked as speaking.")]
+        public int requestTimeoutSeconds = 30;
 
         /// <summary>
         /// How long to keep the clip alive after the last sample has been handed over. The samples OnRead writes are
@@ -127,6 +129,7 @@ namespace CutOnce.Copilot.Voice
             using var request = UnityWebRequest.Get(url);
             var handler = new PcmDownloadHandler(this);
             request.downloadHandler = handler;
+            request.timeout = Mathf.Max(5, requestTimeoutSeconds);
             if (!string.IsNullOrEmpty(bearerToken)) request.SetRequestHeader("Authorization", "Bearer " + bearerToken);
 
             var operation = request.SendWebRequest();
@@ -145,6 +148,8 @@ namespace CutOnce.Copilot.Voice
             _source.Play();
 
             yield return operation;
+            if (request.result != UnityWebRequest.Result.Success)
+                Debug.LogWarning($"[Copilot] answer audio stream ended early: {request.responseCode} {request.error}. Text remains available.");
             _finished = true;
         }
 

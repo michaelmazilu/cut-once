@@ -71,7 +71,7 @@ namespace CutOnce.Copilot.Net
 
         /// <summary>One question. `onDone` gets the parsed response, or null with a reason in `onError`.</summary>
         public IEnumerator Query(string assemblyId, string contextJson, byte[] wav, byte[] jpeg,
-                                 Action<CopilotResponseDto> onDone, Action<string> onError, float timeoutSeconds = 12f)
+                                 Action<CopilotResponseDto> onDone, Action<string> onError, float timeoutSeconds = 25f)
         {
             var form = new List<IMultipartFormSection>
             {

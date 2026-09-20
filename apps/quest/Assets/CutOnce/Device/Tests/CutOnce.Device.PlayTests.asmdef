@@ -8,6 +8,7 @@
     "UnityEditor.TestRunner",
     "CutOnce.Copilot",
     "CutOnce.Net",
+    "CutOnce.Vision",
     "UnityEngine.UI"
   ],
   "overrideReferences": true,

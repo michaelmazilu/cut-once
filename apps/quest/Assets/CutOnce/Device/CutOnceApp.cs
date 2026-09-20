@@ -105,7 +105,10 @@ namespace CutOnce.Device
         {
             Run(_sync.Start());
             _stream.Run();
-            if (createCopilot) TryCreateCopilot();
+            // createCopilot controls creation, not configuration: a prefab already in the scene still needs this
+            // launch's server/token, the app host and working platform adapters injected into it.
+            if (createCopilot || FindAnyObjectByType<CopilotController>() != null) TryCreateCopilot();
+            Run(ReportConnectivity());
             // AGENTS rule 3: any copilot, built here or placed in the scene (Rhythm's [Copilot] prefab), needs the camera
             // and microphone. Ask on the headset before first use (the Editor grants at once). The camera waits for its
             // grant by itself; a refusal only costs the copilot its eyes or ears, so the HUD says what still works.
@@ -115,6 +118,26 @@ namespace CutOnce.Device
                 ? new[] { QuestPermissions.Camera, QuestPermissions.Microphone, QuestPermissions.Scene }
                 : new[] { QuestPermissions.Camera, QuestPermissions.Scene };
             QuestPermissions.Request(wanted, (p, ok) => _permissionAnswers.Enqueue((p, ok)));
+        }
+
+        async Task ReportConnectivity()
+        {
+            bool reachable = await _api.IsReachable();
+            if (this == null) return;
+            Debug.Log($"[CutOnce] server {(reachable ? "reachable" : "UNREACHABLE")} at {SafeServerName(_config.BaseUrl)}; device={_config.device_id}.");
+            if (reachable) return;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            var loopback = _config.BaseUrl.Contains("127.0.0.1") || _config.BaseUrl.Contains("localhost");
+            _voiceHud?.ShowNotice(loopback
+                ? "Quest is configured for localhost, which points at the headset. Run pnpm quest:connect, then relaunch."
+                : "Kit's server is unreachable. Check the tunnel/Wi-Fi, then press A again.", 10f);
+#endif
+        }
+
+        static string SafeServerName(string url)
+        {
+            try { return new Uri(url).Authority; }
+            catch { return "invalid server address"; }
         }
 
         void OnDestroy()
@@ -344,18 +367,26 @@ namespace CutOnce.Device
 
         void TryCreateCopilot()
         {
-            if (FindAnyObjectByType<CopilotController>() != null) return;
             try
             {
-                var go = new GameObject("[Copilot]");
-                go.SetActive(false);                                   // fields must be set before CopilotController.Awake reads them
-                go.AddComponent<AudioSource>();
-                var controller = go.AddComponent<CopilotController>();
-                controller.baseUrl = _config.BaseUrl; controller.apiToken = _config.api_token;
-                controller.frameSourceBehaviour = AddCameraSource(go); controller.hostBehaviour = this;
-                controller.pushToTalkBehaviour = go.AddComponent<QuestPushToTalk>();
-                controller.mic = go.AddComponent<MicRecorder>(); controller.speaker = go.AddComponent<PcmStreamPlayer>();
-                go.SetActive(true);
+                var controller = FindAnyObjectByType<CopilotController>();
+                var go = controller != null ? controller.gameObject : new GameObject("[Copilot]");
+                bool activate = controller == null || !go.activeSelf;
+                if (controller == null)
+                {
+                    go.SetActive(false);                               // fields are injected before its first active frame
+                    controller = go.AddComponent<CopilotController>();
+                }
+                if (go.GetComponent<AudioSource>() == null) go.AddComponent<AudioSource>();
+
+                var frames = controller.frameSourceBehaviour as ICameraFrameSource != null
+                    ? controller.frameSourceBehaviour : AddCameraSource(go);
+                var ptt = controller.pushToTalkBehaviour as IPushToTalk != null
+                    ? controller.pushToTalkBehaviour : go.GetComponent<QuestPushToTalk>() ?? go.AddComponent<QuestPushToTalk>();
+                var mic = controller.mic != null ? controller.mic : go.GetComponent<MicRecorder>() ?? go.AddComponent<MicRecorder>();
+                var speaker = controller.speaker != null ? controller.speaker : go.GetComponent<PcmStreamPlayer>() ?? go.AddComponent<PcmStreamPlayer>();
+                controller.Configure(_config.BaseUrl, _config.api_token, frames, this, ptt, mic, speaker);
+                if (activate) go.SetActive(true);
             }
             catch (Exception e) { Debug.LogWarning("[CutOnce] The copilot could not be created; the build guide still works: " + e.Message); }
         }

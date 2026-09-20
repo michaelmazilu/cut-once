@@ -34,6 +34,10 @@ Headset app (Unity closed): `pnpm quest:check`, `pnpm quest:build`, `pnpm quest:
 Useful: `pnpm pm validate <plan.json>`, `pnpm gen:fixtures`, `pnpm sync:fixtures`, `pnpm reindex`, `pnpm search:eval`, `pnpm serve:local` + `pnpm tunnel`, `pnpm backup`.
 Put it online (laptop + Cloudflare tunnel, no VM): `infra/README.md`. Elasticsearch: `knowledge/README.md`.
 
+Quest changes must preserve passive vision, Kit responses, and blueprint creation. Run `pnpm quest:pillars` and follow
+[`docs/quest-three-pillars.md`](docs/quest-three-pillars.md) before changing vision, AI/provider, networking, schemas,
+analytics, or data-pipeline code.
+
 ## Honest labels
 **Live:** the aligned hologram, part states, the event log and rewind, the copilot, the camera check, search.
 **Precomputed by our own pipeline, then replayed:** the desk test plan, read from its drawings and reviewed by a person.

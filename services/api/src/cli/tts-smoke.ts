@@ -2,14 +2,16 @@
 import "../env.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { models } from "../copilot/models.js";
 import { streamSpeech } from "../copilot/speech.js";
 import { loadConfig } from "../config.js";
 
 const cfg = loadConfig();
+const speechConfig = { ...cfg, elevenVoiceId: cfg.elevenVoiceId || models(cfg).voiceId };
 const out = join(cfg.dataDir, "tts-smoke.pcm");
 const started = Date.now();
 try {
-  const stream = await streamSpeech(cfg, "Run the cable through the tray to the right rear leg, then clip it down the leg every 20 centimetres.");
+  const stream = await streamSpeech(speechConfig, "Run the cable through the tray to the right rear leg, then clip it down the leg every 20 centimetres.");
   const chunks: Uint8Array[] = [];
   let firstMs = 0;
   for await (const chunk of stream) { if (!firstMs) firstMs = Date.now() - started; chunks.push(chunk); }

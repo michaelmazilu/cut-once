@@ -10,6 +10,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: pnpm install --frozen-lockfile
+      - run: pnpm quest:pillars
       - run: pnpm typecheck
       - run: pnpm test
   # The headset's pure C# (state replay, sync, HUD wording): the same NUnit tests Unity runs, without Unity.

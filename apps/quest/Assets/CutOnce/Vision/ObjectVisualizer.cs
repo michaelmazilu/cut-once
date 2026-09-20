@@ -50,6 +50,8 @@ namespace CutOnce.Vision
         [Header("Label")]
         public float labelGap = 0.04f;      // metres above the top of the highlight
         public float labelSize = 0.005f;
+        [Tooltip("Height of the recognition label while depth has located an object but the measured box is not trustworthy yet.")]
+        public float unmeasuredLabelHeight = 0.12f;
 
         [Tooltip("How fast visuals catch up to the tracked position, in metres/second of lerp.")]
         public float followSpeed = 8f;
@@ -60,7 +62,7 @@ namespace CutOnce.Vision
             public MeshRenderer highlight;
             public TextMesh text, shadow;
             public string lastName;
-            public bool lastFocused, lastDebug, surfaceOn;
+            public bool lastFocused, lastDebug, surfaceOn, geometryOn = true;
             public float nextDebugRefresh;
         }
         private readonly System.Collections.Generic.Dictionary<GameObject, Cached> _visuals = new();
@@ -110,8 +112,12 @@ namespace CutOnce.Vision
             }
         }
 
-        /// <summary>Create or update the visual for a tracked object. Focused = the one under the gaze.</summary>
-        public void Show(TrackedObject o, bool focused = false)
+        /// <summary>
+        /// Create or update the visual for a tracked object. A failed box fit still gets a label: recognition and
+        /// measurement are independent, and hiding both made a healthy detector look dead. The unsafe guessed box stays
+        /// hidden until a measured box lands; only the label uses the already depth-located centre.
+        /// </summary>
+        public void Show(TrackedObject o, bool focused = false, bool showGeometry = true)
         {
             if (o.visual == null) o.visual = Build(o);
             if (!o.visual.activeSelf) o.visual.SetActive(true);
@@ -124,9 +130,14 @@ namespace CutOnce.Vision
             var follow = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
             t.position = Vector3.Lerp(t.position, o.DisplayCentre, follow);
             var cube = cached.highlight.transform;
+            if (cached.geometryOn != showGeometry)
+            {
+                cached.geometryOn = showGeometry;
+                cached.highlight.enabled = showGeometry;
+            }
             // Depth is supported but arrives late (first seconds, after sleep). Until it does, and
             // whenever it drops, this object wears the box look; the moment it is back, the paint.
-            var paintNow = _surface != null && _depth != null && _depth.IsDepthAvailable;
+            var paintNow = showGeometry && _surface != null && _depth != null && _depth.IsDepthAvailable;
             var targetSize = paintNow ? o.DisplaySize * surfacePad : o.DisplaySize;
             cube.localScale = Vector3.Lerp(cube.localScale, targetSize, follow);
             // The turn goes on the cube for the same reason the size does: the label is a sibling and must stay
@@ -161,8 +172,11 @@ namespace CutOnce.Vision
                 if (cached.shadow != null) cached.shadow.text = wanted;
             }
 
-            // The label sits just above the highlight's top face, whatever size the object is.
-            cached.label.localPosition = new Vector3(0f, cube.localPosition.y + cube.localScale.y * 0.5f + labelGap, 0f);
+            // A measured label sits over its box. Before a fit succeeds, the label alone proves recognition is live
+            // without bringing back the oversized guessed boxes this pipeline replaced.
+            cached.label.localPosition = showGeometry
+                ? new Vector3(0f, cube.localPosition.y + cube.localScale.y * 0.5f + labelGap, 0f)
+                : new Vector3(0f, unmeasuredLabelHeight, 0f);
 
             // Billboard: face the headset, upright, so text is never mirrored or tilted.
             if (_camera == null && Camera.main != null) _camera = Camera.main.transform;

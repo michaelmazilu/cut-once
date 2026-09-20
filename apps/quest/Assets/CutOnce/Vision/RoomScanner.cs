@@ -249,7 +249,7 @@ namespace CutOnce.Vision
                 var head = _eye.transform;
                 foreach (var o in Tracker.Objects)
                 {
-                    if (!o.visible || !Drawable(o)) continue;
+                    if (!o.visible) continue;
                     var offset = o.DisplayCentre - head.position;
                     float distance = offset.magnitude;
                     if (distance < .2f || distance > 4f) continue;
@@ -267,10 +267,10 @@ namespace CutOnce.Vision
             var shown = 0;
             foreach (var o in Tracker.Objects)
             {
-                if (!o.visible || !Drawable(o)) { Visualizer.Hide(o); continue; }
+                if (!o.visible) { Visualizer.Hide(o); continue; }
                 var head = _eye != null ? _eye.transform.position : Vector3.zero;
                 var near = Vector3.Distance(head, o.DisplayCentre) <= maxHighlightDistance;
-                if (near && shown < maxHighlighted) { Visualizer.Show(o, o == focus); shown++; }
+                if (near && shown < maxHighlighted) { Visualizer.Show(o, o == focus, Drawable(o)); shown++; }
                 else Visualizer.Hide(o);
             }
 
@@ -278,10 +278,10 @@ namespace CutOnce.Vision
         }
 
         /// <summary>
-        /// Is there a box worth drawing? Where depth exists, only a MEASURED one: the old estimate is what put
-        /// metre-wide holograms around people, and an object waits a fraction of a second for its first fit rather
-        /// than wearing a wrong box in the meantime. Without depth — the Editor, or Link — there is nothing to
-        /// measure from, so the old estimate is all there is and the pipeline can still be watched end to end.
+        /// Is there geometry worth drawing? Where depth exists, only a MEASURED box: the old estimate is what put
+        /// metre-wide holograms around objects. Recognition still gets a label while its first fit is pending,
+        /// rather than wearing a wrong box. Without depth, the Editor or Link has nothing to measure from, so the
+        /// old estimate is all there is and the pipeline can still be watched end to end.
         /// </summary>
         private bool Drawable(TrackedObject o) => o.hasMeasuredBox || showUnmeasured || !Locator.IsSupported;
 

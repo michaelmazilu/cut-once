@@ -67,6 +67,38 @@ namespace CutOnce.Device.PlayTests
         }
 
         [UnityTest]
+        public IEnumerator AnAcceptedScanRecoversBlueprintsWhenTheWebSocketMessageIsLost()
+        {
+            var app = StartApp("[App] (build recovery test)", copilot: true);
+            yield return UntilTheFirstRunShows();
+            var mode = BuildModeOf();
+            StubServer server = null;
+            yield return ScanRig(mode, (_, srv) => server = srv);
+
+            var inventory = Inventory(new[] { 0.1, 0.8185, 0.5 }, session: "bsess_recovered").inventory;
+            var snapshot = new BuildSessionSnapshotDto
+            {
+                session = new BuildSessionInfoDto { session_id = "bsess_recovered" },
+                surfaces = inventory.surfaces,
+                twins = inventory.twins,
+                ideas = IdeasFixture().ideas,
+            };
+            server.Answer = request => request.Url.EndsWith("/v1/build/scans")
+                ? Accepted("scan_recovered", "bsess_recovered")
+                : StubServer.Json(200, CoreJson.Write(snapshot));
+
+            Call(mode, "StartScan");
+            yield return Until(() => Phase(mode) == BuildPhase.Ideas, 8f,
+                "the HTTP scan succeeded but lost WebSocket messages stranded its blueprints");
+
+            Assert.That(server.To("/v1/build/sessions/current"), Is.Not.Empty, "the accepted session was never polled");
+            Assert.That(GameObject.Find("[BuildTwins]").transform.Find("part_o1"), Is.Not.Null);
+            Assert.That(GameObject.Find("[Idea] Can on a stage"), Is.Not.Null);
+            Object.Destroy(app.gameObject);
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator LeavingStopsTheScanAndALateAnswerDoesNotSwitchBuildModeBackOn()
         {
             var app = StartApp("[App] (build leave-mid-scan test)", copilot: true);

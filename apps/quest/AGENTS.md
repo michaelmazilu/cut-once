@@ -72,6 +72,10 @@ if the headset misses 72 fps.
 
 Say which step you reached. "Compiles in the Editor" is not "works on the Quest".
 
+0. **Three-pillar contract.** Run `pnpm quest:pillars` and read
+   [`docs/quest-three-pillars.md`](../../docs/quest-three-pillars.md) before changing vision, Copilot/provider,
+   networking, build generation, schemas, analytics or data pipelines. A refactor must update its behavioural test and
+   the contract gate in the same change; do not remove a fallback merely because a new primary path should work.
 1. **Compiles.** No errors in the Console.
 2. **Tests pass.** Run the EditMode tests in the Test Runner, or `pnpm quest:check` with the Editor closed. That
    also compiles the code as the Android build does, runs Meta's Project Setup Tool checks, and checks every build

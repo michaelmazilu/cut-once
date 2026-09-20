@@ -32,6 +32,7 @@ namespace CutOnce.Device
         bool _overServerRun;
         /// <summary>Where the last design was placed, and which plan that was: another run that arrives while the hologram is still there stands there too.</summary>
         BuildOriginDto _site; string _sitePlanId;
+        string _recoveringSession;
 
         public bool Active => _flow.Active;
         /// <summary>The pieces are between their real objects and the design: the hologram's bounds are half the room, so nothing should be stood against them.</summary>
@@ -117,7 +118,8 @@ namespace CutOnce.Device
             var accepted = await _api.PostBuildScan(scan);
             if (this == null) return;
             if (accepted == null) { ScanFailed("the server didn't get the scan", ticket); return; }
-            _flow.OnScanAccepted(ticket, accepted.session_id);               // for a scan given up meanwhile, this only marks its session as left
+            if (_flow.OnScanAccepted(ticket, accepted.session_id))
+                Run(RecoverSession(accepted.session_id));                    // the WebSocket is an accelerator, not the only path to blueprints
         }
 
         // ── what the server sends ─────────────────────────────────────────────────────────────────────────────────
@@ -154,6 +156,29 @@ namespace CutOnce.Device
         }
 
         bool _catchingUp;
+
+        /// <summary>
+        /// Venue Wi-Fi and tunnels can drop the inventory/ideas WebSocket messages after the scan's HTTP 202 already
+        /// arrived. Poll the session snapshot while this headset is waiting, so a successful blueprint job cannot be
+        /// stranded on the server. BuildFlow validates the session and phase before accepting anything recovered.
+        /// </summary>
+        async Task RecoverSession(string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionId) || _recoveringSession == sessionId) return;
+            _recoveringSession = sessionId;
+            try
+            {
+                for (int attempt = 0; attempt < 30; attempt++)
+                {
+                    await Task.Delay(1500);
+                    if (this == null || !_flow.Active || _flow.SessionId != sessionId || _flow.Phase == BuildPhase.Ideas) return;
+                    await CatchUp();
+                }
+                if (this != null && _flow.Active && _flow.SessionId == sessionId && _flow.Phase != BuildPhase.Ideas)
+                    _hud.Toast("The scan reached Kit, but its designs are still delayed. Check the tunnel/Wi-Fi; recovery is still available on reconnect.", 8f);
+            }
+            finally { if (_recoveringSession == sessionId) _recoveringSession = null; }
+        }
 
         async Task CatchUp()
         {
