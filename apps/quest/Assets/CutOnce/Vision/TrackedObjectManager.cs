@@ -39,15 +39,20 @@ namespace CutOnce.Vision
         /// <summary>Why the last attempt produced nothing, for the debug label.</summary>
         public string lastFitReason = "";
 
-        // The newest detection of this object, kept so a measurement can be paced apart from the frame that saw it.
-        // Objects do not move on their own, so a box that is a few frames stale still points at the right thing.
+        // The newest detection of this object, kept so geometry can be measured apart from the inference that saw it.
+        // Position keeps following the lightweight locator between those measurements; this snapshot is only for the
+        // slower size/yaw fit.
         public Rect lastBox;
         public Vector2 lastInputSize;
         public Pose lastPose;
         public bool hasLastBox;
 
-        /// <summary>What the highlight should be drawn as: the measured box where there is one, the old estimate otherwise.</summary>
-        public Vector3 DisplayCentre => hasMeasuredBox ? measuredCentre : smoothedWorldPosition;
+        /// <summary>
+        /// The highlight always follows the live tracker. A successful box fit snaps this value to the measured centre,
+        /// then every later detection moves it again while the slower box fitter keeps refining size and yaw. Returning
+        /// measuredCentre here would freeze a highlighted object between round-robin box measurements.
+        /// </summary>
+        public Vector3 DisplayCentre => smoothedWorldPosition;
         public Vector3 DisplaySize => hasMeasuredBox ? measuredSize : smoothedWorldSize;
         public float DisplayYawDeg => hasMeasuredBox ? measuredYawDeg : 0f;
     }

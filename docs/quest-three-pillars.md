@@ -11,8 +11,9 @@ engineering, networking, Unity scenes, or Quest settings are incomplete until th
 - A stable recognised object must remain visible to the wearer even when depth-box fitting is late or rejects the shape.
 - Before a trustworthy measurement exists, show the label only. Never restore the oversized one-distance guessed box.
 - When measurement succeeds, retain the measured centre, size, yaw, surface paint, smoothing, distance cap, and visual
-  budget. Build mode may pause passive scanning for frame time and visual clarity, but it must resume on every exit or
-  failed first scan.
+  budget. The measured highlight must continue following the live tracked centre after every later detection; the slower
+  round-robin box fit refines its size and yaw but must not freeze its position between measurements. Build mode may pause
+  passive scanning for frame time and visual clarity, but it must resume on every exit or failed first scan.
 
 Failure criteria: camera/model errors, detections permanently filtered to zero on a representative headset scene,
 recognised objects hidden solely because `hasMeasuredBox` is false, stale objects surviving tracking-origin changes,

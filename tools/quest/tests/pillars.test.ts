@@ -17,6 +17,16 @@ describe("Quest three-pillar regression gate", () => {
     expect(problems.map(p => p.id)).toContain("P2-VISION-FALLBACK");
   });
 
+  it("fails if a measured highlight stops following the live tracker", () => {
+    const problems = pillarProblems(undefined, path => {
+      const source = readFileSync(path, "utf8");
+      return path.endsWith("TrackedObjectManager.cs")
+        ? source.replace("public Vector3 DisplayCentre => smoothedWorldPosition", "public Vector3 DisplayCentre => measuredCentre")
+        : source;
+    });
+    expect(problems.map(p => p.id)).toContain("P2-VISION-TRACKING");
+  });
+
   it("fails if accepted scans stop recovering missed blueprint messages", () => {
     const problems = pillarProblems(undefined, path => {
       const source = readFileSync(path, "utf8");

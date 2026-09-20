@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using CutOnce.Core.Vision;
 using UnityEngine;
 
 namespace CutOnce.Vision.Tests
@@ -53,6 +54,34 @@ namespace CutOnce.Vision.Tests
             Assert.That(bottle.smoothedWorldSize, Is.EqualTo(updatedBottleSize));
             Assert.That(chair.visible, Is.True);
             Assert.That(bottle.visible, Is.True);
+        }
+
+        [Test]
+        public void MeasuredHighlightContinuesFollowingLaterDetections()
+        {
+            _gameObject = new GameObject("measured tracker test");
+            var tracker = _gameObject.AddComponent<TrackedObjectManager>();
+            tracker.hitsBeforeVisible = 1;
+            tracker.positionSmoothing = 1f;
+            tracker.jumpRejectDistance = 2f;
+
+            var detection = Detection(39, "bottle");
+            var tracked = tracker.Observe(detection, new Vector3(0f, .8f, 1f), new Vector3(.1f, .3f, .1f));
+            tracker.Measure(tracked, FitResult.Fitted(
+                new P3(.01f, .81f, 1.01f), 12f, new P3(.1f, .3f, .1f), .9f, 100));
+
+            Assert.That(tracked.hasMeasuredBox, Is.True);
+            Assert.That(tracked.DisplayCentre, Is.EqualTo(new Vector3(.01f, .81f, 1.01f)),
+                "the first trustworthy depth fit should place the highlight");
+
+            var moved = new Vector3(.09f, .82f, 1.03f);
+            tracker.Observe(detection, moved, new Vector3(.1f, .3f, .1f));
+
+            Assert.That(tracked.DisplayCentre, Is.EqualTo(moved),
+                "a measured highlight must follow every later tracked position, not wait for another expensive box fit");
+            Assert.That(tracked.DisplaySize, Is.EqualTo(new Vector3(.1f, .3f, .1f)),
+                "continuous position tracking must retain the measured geometry");
+            Assert.That(tracked.DisplayYawDeg, Is.EqualTo(12f));
         }
 
         private static DetectedObject Detection(int classId, string className) => new DetectedObject

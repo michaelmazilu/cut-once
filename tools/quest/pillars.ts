@@ -16,6 +16,7 @@ const files = {
   controller: "apps/quest/Assets/CutOnce/Copilot/CopilotController.cs",
   client: "apps/quest/Assets/CutOnce/Copilot/Net/CopilotClient.cs",
   scanner: "apps/quest/Assets/CutOnce/Vision/RoomScanner.cs",
+  tracker: "apps/quest/Assets/CutOnce/Vision/TrackedObjectManager.cs",
   visualizer: "apps/quest/Assets/CutOnce/Vision/ObjectVisualizer.cs",
   build: "apps/quest/Assets/CutOnce/Device/Build/BuildMode.cs",
 } as const;
@@ -65,6 +66,9 @@ export function pillarProblems(root = ROOT, read: Reader = p => readFileSync(p, 
     "Recognised objects must reach ObjectVisualizer even before a measured box exists.");
   needs("P2-VISION-FALLBACK", !/if \(!o\.visible \|\| !Drawable\(o\)\)/.test(scanner),
     "Do not hide recognition merely because measured geometry is unavailable.");
+  const tracker = text("tracker");
+  needs("P2-VISION-TRACKING", /public Vector3 DisplayCentre\s*=>\s*smoothedWorldPosition/.test(tracker),
+    "Measured highlights must keep following the continuously updated tracked position between box fits.");
   const visualizer = text("visualizer");
   needs("P2-VISION-FALLBACK", /bool showGeometry = true/.test(visualizer)
     && /cached\.highlight\.enabled = showGeometry/.test(visualizer)
