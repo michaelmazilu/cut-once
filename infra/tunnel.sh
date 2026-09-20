@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Bash scripts must use LF endings; .gitattributes enforces this on every platform.
 # Puts the server that is already running on this laptop (pnpm serve:local) on a public HTTPS address.
 #   pnpm tunnel                               random https://<words>.trycloudflare.com, new on every run, no account
 #   pnpm tunnel <tunnel-name> <https://host>  a named tunnel on your own domain (one-time setup in infra/README.md)

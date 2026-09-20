@@ -7,7 +7,7 @@ namespace CutOnce.UI
 {
     /// <summary>
     /// A compact task panel: current instruction, progress, connection and the part under the pointer.
-    /// Answers and temporary notices share the panel instead of floating above and below it.
+    /// Build narration and temporary notices share the panel instead of floating above and below it.
     /// It is world-locked (a head-locked panel shakes on the cast) and built in code, so there is no prefab to break.
     /// All wording comes from Core.HudText.
     /// </summary>
@@ -17,7 +17,7 @@ namespace CutOnce.UI
         static readonly Color Panel = new Color(0.035f, 0.045f, 0.05f, 0.94f), Ink = new Color(0.92f, 0.97f, 1f, 1f), Dim = new Color(0.65f, 0.70f, 0.70f, 1f),
             Accent = new Color(0.58f, 0.82f, 0.73f, 1f), Warn = new Color(1f, 0.85f, 0.3f, 1f);
 
-        Text _title, _progress, _stepTitle, _stepBody, _part, _status, _toast, _answer, _hint, _copilot;
+        Text _title, _progress, _stepTitle, _stepBody, _part, _status, _toast, _answer, _hint;
         RectTransform _bar, _barBack, _panel;
         bool _hasBuild;
         float _toastUntil, _answerUntil;
@@ -48,7 +48,6 @@ namespace CutOnce.UI
             _stepTitle = Label(root, "step title", 22, 122, Width - 44, 44, 19, Ink, TextAnchor.UpperLeft);
             _stepBody = Label(root, "step body", 22, 170, Width - 44, 72, 16, Dim, TextAnchor.UpperLeft);
             _part = Label(root, "part", 22, 250, Width - 44, 100, 14, Ink, TextAnchor.UpperLeft);
-            _copilot = Label(root, "copilot activity", 22, 0, Width - 44, 32, 16, Accent, TextAnchor.UpperLeft);
             _toast = Label(root, "toast", 22, 0, Width - 44, 44, 14, Warn, TextAnchor.UpperLeft);
             _answer = Label(root, "answer", 22, 0, Width - 44, 100, 16, Ink, TextAnchor.UpperLeft);
             Layout();
@@ -102,15 +101,6 @@ namespace CutOnce.UI
         }
         public void ShowAnswer(string text) { _answer.text = text ?? ""; _answerUntil = Time.time + 25f; Layout(); }
 
-        public void ShowCopilotActivity(string activity)
-        {
-            _copilot.text = activity == "listening" ? "LISTENING  -  release A to send"
-                          : activity == "thinking" ? "THINKING..."
-                          : "";
-            _copilot.color = activity == "thinking" ? Warn : Accent;
-            Layout();
-        }
-
         public void Toast(string text, float seconds = 3f)
         {
             _toast.text = text; _toastUntil = Time.time + seconds; Layout();
@@ -132,7 +122,6 @@ namespace CutOnce.UI
                 Stack(_stepTitle, ref y, 26, 68);
                 Stack(_stepBody, ref y, 24, 160);
             }
-            Stack(_copilot, ref y, 22, 36);
             Stack(_hint, ref y, 22, 76);
             // The answer temporarily takes the context slot; selecting a part still updates its card underneath.
             if (!string.IsNullOrEmpty(_answer.text))
@@ -168,12 +157,6 @@ namespace CutOnce.UI
             if (_toast.text.Length > 0 && Time.time > _toastUntil) { _toast.text = ""; changed = true; }
             if (_answer.text.Length > 0 && Time.time > _answerUntil) { _answer.text = ""; changed = true; }
             if (changed) Layout();
-            if (_copilot.text.Length > 0)
-            {
-                var c = _copilot.color;
-                c.a = 0.65f + 0.35f * (0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 7f));
-                _copilot.color = c;
-            }
         }
 
         /// <summary>Before anything is placed the panel carries the instructions, so it floats in front of the operator, a little below eye level.</summary>
